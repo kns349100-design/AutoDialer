@@ -1,0 +1,2 @@
+rootProject.name = "AutoDialer"
+include ':app'
