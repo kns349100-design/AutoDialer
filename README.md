@@ -1,5 +1,23 @@
 # AutoDialer — Setup Guide
 
+## Is version me kya naya hai
+
+- **Reliable state machine** (`CallSequencer.kt`) jo guarantee karta hai ki ek call-end event kabhi do baar dial trigger nahi karega, chahe Android duplicate phone-state events bheje
+- **Unit tests** (`CallSequencerTest.kt`) jo isi guarantee ko automatically verify karte hain har build pe (GitHub Actions ab `gradle testDebugUnitTest` bhi chalata hai APK banane se pehle)
+- **Pause / Resume / Skip / Stop** — sab safe hain (Skip sirf tab kaam karta hai jab call active na ho, kyunki Android normal apps ko ek chal rahi call ko force-end karne ki permission nahi deta)
+- **Dashboard**: progress bar, pending/completed/skipped counts
+- **Duplicate number detection** list load karte waqt
+- **Optional naam** har number ke saath (`Rahul, 9876543210` format me)
+- **Delay selector**: 2/3/5/10 second
+- **Crash/rotation recovery**: session SharedPreferences me save hota hai; app restart hone par "Resume Session" banner dikhta hai — **lekin auto-call nahi hoti**, aapko manually "Start" dabana padega (safety ke liye)
+- **Consent checkbox**: "Start" se pehle confirm karna padta hai ki numbers consenting/authorized hain
+
+## Jaan-boojh kar chhoda gaya (technical ya scope reasons se)
+
+- **Answered / Busy / Rejected / No-Answer detection**: Android normal apps ko outgoing call ka ye status reliably nahi deta — ye sirf "default dialer app" bankar milta hai (bahut bada alag scope + zyada sensitive permissions). Isliye sirf "Completed" track hota hai, fake status nahi dikhaya jata.
+- Room database / poori Call History screen, CSV/TXT import-export, contact-book picker, debug-log export screen, full Material 3 redesign — ye sab agle iteration me add ho sakte hain agar chahiye
+
+
 Ye ek simple Android app hai:
 1. Number list paste karo (ek number per line)
 2. "List Load Karo" dabao
