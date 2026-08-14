@@ -22,6 +22,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: NumberAdapter
     private lateinit var sessionStore: SessionStore
+    private lateinit var callLogStore: CallLogStore
     private lateinit var engine: CallEngine
 
     private val requiredPermissions = arrayOf(
@@ -44,7 +45,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         setContentView(binding.root)
 
         sessionStore = SessionStore(this)
-        engine = CallEngine(this, sessionStore, this)
+        callLogStore = CallLogStore(this)
+        engine = CallEngine(this, sessionStore, callLogStore, this)
 
         adapter = NumberAdapter(mutableListOf())
         binding.rvNumbers.layoutManager = LinearLayoutManager(this)
@@ -61,6 +63,9 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.btnStop.setOnClickListener { engine.stop() }
         binding.btnDashboard.setOnClickListener {
             startActivity(Intent(this, HistoryActivity::class.java))
+        }
+        binding.btnSheets.setOnClickListener {
+            startActivity(Intent(this, CallLogActivity::class.java))
         }
 
         // The 4 full-screen outcome boxes - tapping any one dials the next number instantly.
@@ -167,6 +172,13 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.tvDuplicateInfo.text = if (duplicates.isNotEmpty())
             "${duplicates.size} duplicate number(s) mile aur remove kar diye gaye." else ""
 
+        val alreadyCalledCount = deduped.count { callLogStore.allCalledPhones().contains(it.phone) }
+        if (alreadyCalledCount > 0) {
+            val existing = binding.tvDuplicateInfo.text.toString()
+            val warning = "$alreadyCalledCount number(s) pehle bhi call ho chuke hain (Sheets me check karo)."
+            binding.tvDuplicateInfo.text = if (existing.isEmpty()) warning else "$existing\n$warning"
+        }
+
         engine.loadLeads(deduped, "Session ${System.currentTimeMillis()}")
         adapter.setLeads(engine.leads)
         refreshDashboard()
@@ -222,7 +234,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         val completed = leads.count { it.status == CallSequencer.Status.COMPLETED }
         val skipped = leads.count { it.status == CallSequencer.Status.SKIPPED }
         val pending = leads.count { it.status == CallSequencer.Status.PENDING }
-        binding.tvProgress.text = "Progress: ${completed + skipped} / $total"
+        binding.tvProgress.text = "${completed + skipped} / $total"
         binding.tvCounts.text = "Pending: $pending  Completed: $completed  Skipped: $skipped"
         binding.progressBar.max = if (total > 0) total else 1
         binding.progressBar.progress = completed + skipped

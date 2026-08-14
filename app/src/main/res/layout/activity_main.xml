@@ -6,7 +6,9 @@
 
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:paddingBottom="86dp"
+        android:clipToPadding="false">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -14,6 +16,7 @@
             android:orientation="vertical"
             android:padding="16dp">
 
+            <!-- Top bar -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -21,67 +24,77 @@
                 android:gravity="center_vertical">
 
                 <TextView
-                    android:id="@+id/tvSessionName"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:text="Session: (not started)"
+                    android:text="AutoDialer"
                     android:textStyle="bold"
                     android:textColor="@color/text_primary_dark"
-                    android:textSize="17sp"/>
+                    android:textSize="18sp"/>
+
+                <TextView
+                    android:id="@+id/btnSheets"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_avatar"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:textColor="@color/text_primary_dark"
+                    android:textSize="11sp"
+                    android:text="Sheets"/>
 
                 <TextView
                     android:id="@+id/btnDashboard"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
                     android:background="@drawable/bg_avatar"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
                     android:paddingTop="8dp"
                     android:paddingBottom="8dp"
                     android:textColor="@color/text_primary_dark"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     android:text="Dashboard"/>
             </LinearLayout>
 
+            <!-- Gradient hero card: session progress -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:background="@drawable/bg_card"
-                android:padding="16dp"
+                android:background="@drawable/bg_hero_gradient"
+                android:padding="20dp"
                 android:layout_marginTop="14dp">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:id="@+id/tvSessionName"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:textColor="#D8CCF5"
+                    android:textSize="12sp"
+                    android:text="Session: (not started)"/>
 
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_weight="1"
-                        android:layout_height="wrap_content"
-                        android:text="Progress"
-                        android:textColor="@color/text_muted_dark"
-                        android:textSize="12sp"/>
-
-                    <TextView
-                        android:id="@+id/tvProgress"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Progress: 0 / 0"
-                        android:textColor="@color/text_primary_dark"
-                        android:textSize="12sp"/>
-                </LinearLayout>
+                <TextView
+                    android:id="@+id/tvProgress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    android:textSize="30sp"
+                    android:text="0 / 0"/>
 
                 <ProgressBar
                     android:id="@+id/progressBar"
                     style="?android:attr/progressBarStyleHorizontal"
                     android:layout_width="match_parent"
-                    android:layout_height="8dp"
-                    android:layout_marginTop="8dp"
-                    android:progressTint="@color/progress_fill"
-                    android:progressBackgroundTint="@color/progress_track"
+                    android:layout_height="6dp"
+                    android:layout_marginTop="14dp"
+                    android:progressTint="#FFFFFF"
+                    android:progressBackgroundTint="#40FFFFFF"
                     android:max="100"
                     android:progress="0"/>
 
@@ -90,11 +103,12 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:textColor="@color/text_secondary_dark"
+                    android:textColor="#D8CCF5"
                     android:textSize="12sp"
                     android:text="Pending: 0  Completed: 0  Skipped: 0"/>
             </LinearLayout>
 
+            <!-- Current call card -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -233,64 +247,6 @@
                 android:text="Ye sab consenting/authorized contacts hain"
                 android:textSize="12sp"/>
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="10dp">
-
-                <TextView
-                    android:id="@+id/btnStart"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/bg_pill_resume"
-                    android:gravity="center"
-                    android:padding="12dp"
-                    android:textColor="@color/resume_text"
-                    android:textSize="12sp"
-                    android:text="Start"/>
-
-                <TextView
-                    android:id="@+id/btnPause"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_card"
-                    android:gravity="center"
-                    android:padding="12dp"
-                    android:textColor="@color/text_secondary_dark"
-                    android:textSize="12sp"
-                    android:text="Pause"/>
-
-                <TextView
-                    android:id="@+id/btnSkip"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_card"
-                    android:gravity="center"
-                    android:padding="12dp"
-                    android:textColor="@color/text_secondary_dark"
-                    android:textSize="12sp"
-                    android:text="Skip"/>
-
-                <TextView
-                    android:id="@+id/btnStop"
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_pill_no"
-                    android:gravity="center"
-                    android:padding="12dp"
-                    android:textColor="@color/no_text"
-                    android:textSize="12sp"
-                    android:text="STOP"/>
-            </LinearLayout>
-
             <TextView
                 android:id="@+id/tvResumeBanner"
                 android:layout_width="match_parent"
@@ -302,15 +258,89 @@
                 android:visibility="gone"
                 android:text="Pichla session mila - Resume Session dabao"/>
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Numbers"
+                android:textColor="@color/text_primary_dark"
+                android:textStyle="bold"
+                android:textSize="14sp"/>
+
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rvNumbers"
                 android:layout_width="match_parent"
                 android:layout_height="300dp"
-                android:layout_marginTop="10dp"/>
+                android:layout_marginTop="8dp"/>
 
         </LinearLayout>
     </ScrollView>
 
+    <!-- Fixed bottom dock: primary call controls (matches reference app's bottom nav pattern) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:background="@drawable/bg_dock"
+        android:padding="12dp"
+        android:gravity="center">
+
+        <TextView
+            android:id="@+id/btnStart"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_dock_icon_resume"
+            android:gravity="center"
+            android:padding="14dp"
+            android:textColor="@color/resume_text"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:text="Start"/>
+
+        <TextView
+            android:id="@+id/btnPause"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_dock_icon"
+            android:gravity="center"
+            android:padding="14dp"
+            android:textColor="@color/text_secondary_dark"
+            android:textSize="12sp"
+            android:text="Pause"/>
+
+        <TextView
+            android:id="@+id/btnSkip"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_dock_icon"
+            android:gravity="center"
+            android:padding="14dp"
+            android:textColor="@color/text_secondary_dark"
+            android:textSize="12sp"
+            android:text="Skip"/>
+
+        <TextView
+            android:id="@+id/btnStop"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_dock_icon_no"
+            android:gravity="center"
+            android:padding="14dp"
+            android:textColor="@color/no_text"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:text="STOP"/>
+    </LinearLayout>
+
+    <!-- Full-screen glowing 4-box outcome overlay -->
     <LinearLayout
         android:id="@+id/overlayOutcome"
         android:layout_width="match_parent"

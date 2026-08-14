@@ -24,6 +24,7 @@ interface CallEngineListener {
 class CallEngine(
     private val activity: Activity,
     private val sessionStore: SessionStore,
+    private val callLogStore: CallLogStore,
     private val listener: CallEngineListener
 ) {
     var leads: MutableList<Lead> = mutableListOf()
@@ -135,14 +136,22 @@ class CallEngine(
 
     fun skip() {
         val seq = sequencer ?: return
-        val index = seq.skip()
+        val index = seq.currentIndex
+        val leadForLog = if (index in leads.indices) leads[index] else null
+        val result = seq.skip()
         for (i in leads.indices) {
             if (seq.statuses[i] == CallSequencer.Status.SKIPPED && leads[i].status != CallSequencer.Status.SKIPPED) {
                 leads[i].status = CallSequencer.Status.SKIPPED
                 listener.onLeadUpdated(i, CallSequencer.Status.SKIPPED)
             }
         }
-        if (index != null) dial(index)
+        if (leadForLog != null) {
+            callLogStore.addEntry(
+                callLogStore.todayKey(),
+                CallLogEntry(callLogStore.nowTime(), leadForLog.name, leadForLog.phone, "Skipped", null)
+            )
+        }
+        if (result != null) dial(result)
         persist()
     }
 
@@ -203,6 +212,11 @@ class CallEngine(
         if (index in leads.indices) {
             leads[index].outcome = tag
             listener.onLeadUpdated(index, leads[index].status)
+            val lead = leads[index]
+            callLogStore.addEntry(
+                callLogStore.todayKey(),
+                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Completed", tag.name)
+            )
         }
         pendingOutcomeIndex = null
         persist()

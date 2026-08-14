@@ -18,4 +18,8 @@
 
     <color name="progress_track">#2C2C2A</color>
     <color name="progress_fill">#2ED47A</color>
+
+    <color name="gradient_top">#6E3AD1</color>
+    <color name="gradient_bottom">#2A1454</color>
+    <color name="dock_bg">#1A1A1D</color>
 </resources>

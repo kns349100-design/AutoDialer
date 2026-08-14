@@ -1,6 +1,23 @@
 # AutoDialer — Setup Guide
 
-## Is version me kya naya hai (v3)
+## Is version me kya naya hai (v4 — redesign + Call Sheets)
+
+- **Naya UI**: purple gradient "hero card" (session progress, bada number), fixed bottom dock (Start/Pause/Skip/Stop hamesha reachable), top-right "Sheets" aur "Dashboard" icons, transaction-list-style rows (avatar circle + pill badge)
+- **Call Sheets (naya feature)**: har din ka call record automatically ek alag "sheet" me save hota hai (jaise Excel). Top pe day-picker se koi bhi purana din dekh sakte ho
+  - Har row delete kar sakte ho (✕ button, confirmation ke saath)
+  - Pura din ka sheet bhi delete kar sakte ho ("Delete This Sheet", confirmation ke saath)
+- Naye files: `CallLogStore.kt`, `CallLogActivity.kt`, `CallLogAdapter.kt`, `activity_call_log.xml`, `item_call_log.xml`
+
+## Is version me kya naya hai (v5 — robustness + export)
+
+- **CSV Export**: Call Sheets screen me "Export CSV" button — kisi bhi din ka data CSV file bana ke WhatsApp/Email/Drive se share ho sakta hai, Excel me khulti hai
+- **Duplicate-call warning**: Naya list load karte waqt agar koi number pehle (kisi bhi din) call ho chuka hai, warning dikhti hai — dobara call karne se bachne ke liye
+- **Crash-safety**: Agar kabhi saved data corrupt ho jaye, app crash nahi karega — us din ka data khali dikhega, baaki app normally chalega
+
+## "Deploy ready" ka matlab yahan
+
+Ye app **functionally stable aur real use ke liye complete** hai (reliable state machine, tested logic, crash recovery, data persistence). Lekin ye ek **sideload APK** hai (GitHub Actions se banaya), Google Play Store pe publish nahi hai — Play Store pe daalne ke liye alag se Google Play Developer account, store listing, aur Play policies (khaaskar phone-permission apps ke liye) follow karni padti hain. Agar wo bhi chahiye to bata dena, alag se guide karunga.
+
 
 - **File upload** se numbers import (txt/csv, "File Upload" button)
 - Har call khatam hote hi **4 full-screen boxes**: RESUME (blue) / NO (red) / POSITIVE (green) / INFO (orange) — tap karte hi turant agla call (koi delay/timer nahi, seedha instant)
