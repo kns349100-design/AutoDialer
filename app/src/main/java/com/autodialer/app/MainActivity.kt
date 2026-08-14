@@ -68,6 +68,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.btnOutcomeNo.setOnClickListener { selectOutcomeAndHide(OutcomeTag.NO) }
         binding.btnOutcomePositive.setOnClickListener { selectOutcomeAndHide(OutcomeTag.POSITIVE) }
         binding.btnOutcomeInfo.setOnClickListener { selectOutcomeAndHide(OutcomeTag.INFO) }
+        applyGlowShadows()
 
         if (sessionStore.hasSavedSession()) {
             binding.tvResumeBanner.visibility = android.view.View.VISIBLE
@@ -197,6 +198,22 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     private fun selectOutcomeAndHide(tag: OutcomeTag) {
         binding.overlayOutcome.visibility = android.view.View.GONE
         engine.selectOutcome(tag)
+    }
+
+    /** Adds a colored glow shadow to the 4 outcome boxes on Android 9+ (API 28+). */
+    private fun applyGlowShadows() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            val map = listOf(
+                binding.btnOutcomeResume to android.graphics.Color.parseColor("#2E7CF6"),
+                binding.btnOutcomeNo to android.graphics.Color.parseColor("#FF3B5C"),
+                binding.btnOutcomePositive to android.graphics.Color.parseColor("#2ED47A"),
+                binding.btnOutcomeInfo to android.graphics.Color.parseColor("#FFB020")
+            )
+            for ((view, color) in map) {
+                view.outlineAmbientShadowColor = color
+                view.outlineSpotShadowColor = color
+            }
+        }
     }
 
     private fun refreshDashboard() {

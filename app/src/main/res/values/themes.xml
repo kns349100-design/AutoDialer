@@ -1,6 +1,9 @@
 <resources>
-    <style name="Theme.AutoDialer" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorPrimaryVariant">@color/teal_700</item>
+    <style name="Theme.AutoDialer" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="colorPrimary">@color/resume_bg</item>
+        <item name="colorPrimaryVariant">@color/resume_bg</item>
+        <item name="android:windowBackground">@color/bg_dark</item>
+        <item name="android:textColorPrimary">@color/text_primary_dark</item>
+        <item name="android:textColorSecondary">@color/text_secondary_dark</item>
     </style>
 </resources>
