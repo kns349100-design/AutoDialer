@@ -1,69 +1,305 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Number list paste karo (ek number per line):"
-        android:textSize="14sp"
-        android:layout_marginBottom="4dp"/>
-
-    <EditText
-        android:id="@+id/etNumbers"
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="120dp"
-        android:gravity="top|start"
-        android:hint="9876543210&#10;9123456780&#10;..."
-        android:inputType="textMultiLine"
-        android:background="#EEEEEE"
-        android:padding="8dp"/>
+        android:layout_height="match_parent">
 
-    <Button
-        android:id="@+id/btnLoadList"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="List Load Karo"/>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
 
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Status: Ready"
-        android:textStyle="bold"/>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvNumbers"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="8dp"/>
+                <TextView
+                    android:id="@+id/tvSessionName"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="Session: (not started)"
+                    android:textStyle="bold"
+                    android:textSize="16sp"/>
 
+                <Button
+                    android:id="@+id/btnDashboard"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:text="Dashboard"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvProgress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Progress: 0 / 0"/>
+
+            <ProgressBar
+                android:id="@+id/progressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:max="100"
+                android:progress="0"/>
+
+            <TextView
+                android:id="@+id/tvCounts"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textSize="12sp"
+                android:text="Pending: 0  Completed: 0  Skipped: 0"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="#F5F5F5"
+                android:padding="12dp"
+                android:layout_marginTop="12dp">
+
+                <TextView
+                    android:id="@+id/tvCurrentLead"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textStyle="bold"
+                    android:textSize="18sp"
+                    android:text="No active call"/>
+
+                <TextView
+                    android:id="@+id/tvStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Status: Ready"/>
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Numbers paste karo (ek line me). Optional naam: Rahul, 9876543210"
+                android:textSize="12sp"/>
+
+            <EditText
+                android:id="@+id/etNumbers"
+                android:layout_width="match_parent"
+                android:layout_height="120dp"
+                android:gravity="top|start"
+                android:hint="9876543210&#10;Rahul, 9123456780&#10;..."
+                android:inputType="textMultiLine"
+                android:background="#EEEEEE"
+                android:padding="8dp"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <Button
+                    android:id="@+id/btnPasteClipboard"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="11sp"
+                    android:text="Paste Clipboard"/>
+
+                <Button
+                    android:id="@+id/btnImportFile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:textSize="11sp"
+                    android:text="File Upload"/>
+
+                <Button
+                    android:id="@+id/btnLoadList"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:textSize="11sp"
+                    android:text="List Load"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvDuplicateInfo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="#B00020"
+                android:text=""/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="12dp"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:text="Batch target (kitne calls; 0 = sab):"/>
+
+                <EditText
+                    android:id="@+id/etBatchTarget"
+                    android:layout_width="70dp"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:hint="0"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <CheckBox
+                android:id="@+id/cbConsent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Ye sab consenting/authorized contacts hain"
+                android:textSize="12sp"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <Button
+                    android:id="@+id/btnStart"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="11sp"
+                    android:text="Start"/>
+
+                <Button
+                    android:id="@+id/btnPause"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:textSize="11sp"
+                    android:text="Pause"/>
+
+                <Button
+                    android:id="@+id/btnSkip"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:textSize="11sp"
+                    android:text="Skip"/>
+
+                <Button
+                    android:id="@+id/btnStop"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:textSize="11sp"
+                    android:backgroundTint="#B00020"
+                    android:text="STOP"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvResumeBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:padding="8dp"
+                android:background="#FFF3CD"
+                android:visibility="gone"
+                android:text="Pichla session mila - Resume Session dabao"/>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvNumbers"
+                android:layout_width="match_parent"
+                android:layout_height="300dp"
+                android:layout_marginTop="8dp"/>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Full-screen 4-box outcome overlay, shown right after each call ends -->
     <LinearLayout
+        android:id="@+id/overlayOutcome"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="8dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:background="#000000">
 
-        <Button
-            android:id="@+id/btnStart"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:text="Start Calling"/>
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/btnStop"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            <Button
+                android:id="@+id/btnOutcomeResume"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="match_parent"
+                android:backgroundTint="#2196F3"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:text="RESUME"/>
+
+            <Button
+                android:id="@+id/btnOutcomeNo"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="match_parent"
+                android:layout_marginStart="2dp"
+                android:backgroundTint="#E53935"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:text="NO"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="Stop"/>
+            android:layout_marginTop="2dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnOutcomePositive"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="match_parent"
+                android:backgroundTint="#43A047"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:text="POSITIVE"/>
+
+            <Button
+                android:id="@+id/btnOutcomeInfo"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="match_parent"
+                android:layout_marginStart="2dp"
+                android:backgroundTint="#FB8C00"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:text="INFO"/>
+        </LinearLayout>
     </LinearLayout>
 
-</LinearLayout>
+</FrameLayout>

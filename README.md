@@ -1,6 +1,12 @@
 # AutoDialer — Setup Guide
 
-## Is version me kya naya hai
+## Is version me kya naya hai (v3)
+
+- **File upload** se numbers import (txt/csv, "File Upload" button)
+- Har call khatam hote hi **4 full-screen boxes**: RESUME (blue) / NO (red) / POSITIVE (green) / INFO (orange) — tap karte hi turant agla call (koi delay/timer nahi, seedha instant)
+- Jo box select kiya uska **chhota colored tag** us number ke aage list me hamesha dikhta hai
+- **Batch target**: "kitne calls karne hain" likho (0 = sab) — utne ho jaye to auto-ruk jata hai; dobara "Start" dabao to agle number se continue hota hai (jahan chhoda tha wahi se)
+- **Dashboard** (top-right "Dashboard" button): sabhi ho chuki calls + unka tag, aur total Resume/No/Positive/Info count
 
 - **Reliable state machine** (`CallSequencer.kt`) jo guarantee karta hai ki ek call-end event kabhi do baar dial trigger nahi karega, chahe Android duplicate phone-state events bheje
 - **Unit tests** (`CallSequencerTest.kt`) jo isi guarantee ko automatically verify karte hain har build pe (GitHub Actions ab `gradle testDebugUnitTest` bhi chalata hai APK banane se pehle)
