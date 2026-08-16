@@ -14,6 +14,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.autodialer.app.databinding.ActivityMainBinding
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -23,6 +26,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     private lateinit var adapter: NumberAdapter
     private lateinit var sessionStore: SessionStore
     private lateinit var callLogStore: CallLogStore
+    private lateinit var subscriptionManager: SubscriptionManager
+    private lateinit var outcomeStore: OutcomeStore
     private lateinit var engine: CallEngine
 
     private val requiredPermissions = arrayOf(
@@ -39,16 +44,45 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             }
         }
 
+    private val imagePickerLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val data = result.data
+                val uris = mutableListOf<Uri>()
+                val clipData = data?.clipData
+                if (clipData != null) {
+                    for (i in 0 until clipData.itemCount) {
+                        uris.add(clipData.getItemAt(i).uri)
+                    }
+                } else {
+                    data?.data?.let { uris.add(it) }
+                }
+                if (uris.isNotEmpty()) extractNumbersFromImages(uris)
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val authStore = AuthStore(this)
+        if (!authStore.isLoggedIn()) {
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+            return
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         sessionStore = SessionStore(this)
         callLogStore = CallLogStore(this)
+        subscriptionManager = SubscriptionManager(this)
+        outcomeStore = OutcomeStore(this)
+        subscriptionManager.ensureFirstLaunchRecorded()
+        subscriptionManager.refreshStatusInBackground()
         engine = CallEngine(this, sessionStore, callLogStore, this)
 
-        adapter = NumberAdapter(mutableListOf())
+        adapter = NumberAdapter(mutableListOf(), outcomeStore)
         binding.rvNumbers.layoutManager = LinearLayoutManager(this)
         binding.rvNumbers.adapter = adapter
 
@@ -56,36 +90,36 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
         binding.btnPasteClipboard.setOnClickListener { pasteFromClipboard() }
         binding.btnImportFile.setOnClickListener { openFilePicker() }
+        binding.btnImportImage.setOnClickListener { openImagePicker() }
         binding.btnLoadList.setOnClickListener { loadNumbersFromInput() }
         binding.btnStart.setOnClickListener { onStartClicked() }
         binding.btnPause.setOnClickListener { engine.pause() }
         binding.btnSkip.setOnClickListener { engine.skip() }
         binding.btnStop.setOnClickListener { engine.stop() }
+        binding.btnFloatingStop.setOnClickListener { engine.stop() }
         binding.btnDashboard.setOnClickListener {
             startActivity(Intent(this, HistoryActivity::class.java))
         }
         binding.btnSheets.setOnClickListener {
             startActivity(Intent(this, CallLogActivity::class.java))
         }
+        binding.btnSubscription.setOnClickListener {
+            startActivity(Intent(this, SubscriptionActivity::class.java))
+        }
+        binding.btnManageOutcomes.setOnClickListener { showManageOutcomesDialog() }
 
-        // The 4 full-screen outcome boxes - tapping any one dials the next number instantly.
-        binding.btnOutcomeResume.setOnClickListener { selectOutcomeAndHide(OutcomeTag.RESUME) }
-        binding.btnOutcomeNo.setOnClickListener { selectOutcomeAndHide(OutcomeTag.NO) }
-        binding.btnOutcomePositive.setOnClickListener { selectOutcomeAndHide(OutcomeTag.POSITIVE) }
-        binding.btnOutcomeInfo.setOnClickListener { selectOutcomeAndHide(OutcomeTag.INFO) }
-        applyGlowShadows()
+        // Outcome overlay buttons are built dynamically (see renderOutcomeOverlay) so any
+        // number of default + custom options fit and adjust automatically.
+        renderOutcomeOverlay()
 
         if (sessionStore.hasSavedSession()) {
-            binding.tvResumeBanner.visibility = android.view.View.VISIBLE
-            binding.tvResumeBanner.text = "Pichla session mila - tap karo restore karne ke liye"
-            binding.tvResumeBanner.setOnClickListener {
-                if (engine.restoreIfAvailable()) {
-                    adapter.setLeads(engine.leads)
-                    binding.etBatchTarget.setText(if (engine.batchTarget > 0) engine.batchTarget.toString() else "")
-                    refreshDashboard()
-                    binding.tvResumeBanner.visibility = android.view.View.GONE
-                    Toast.makeText(this, "Session restore ho gaya. Manually 'Start' dabao aage badhne ke liye.", Toast.LENGTH_LONG).show()
-                }
+            if (engine.restoreIfAvailable()) {
+                adapter.setLeads(engine.leads)
+                binding.etBatchTarget.setText(if (engine.batchTarget > 0) engine.batchTarget.toString() else "")
+                refreshDashboard()
+                binding.tvResumeBanner.visibility = android.view.View.VISIBLE
+                binding.tvResumeBanner.text = "Previous list restored - tap 'Start' to continue calling it"
+                binding.tvStatus.text = "Status: ${engine.leads.size} numbers restored from last session"
             }
         }
     }
@@ -106,7 +140,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             val text = clip.getItemAt(0).coerceToText(this).toString()
             binding.etNumbers.setText(text)
         } else {
-            Toast.makeText(this, "Clipboard khali hai", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Clipboard is empty", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -127,10 +161,76 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 val existing = binding.etNumbers.text.toString()
                 val merged = if (existing.isBlank()) content else "$existing\n$content"
                 binding.etNumbers.setText(merged)
-                Toast.makeText(this, "File import ho gayi, ab 'List Load' dabao", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "File imported, now tap 'Load List'", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "File read nahi ho payi: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Could not read file: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun openImagePicker() {
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        imagePickerLauncher.launch(Intent.createChooser(intent, "Select image(s) with numbers"))
+    }
+
+    /**
+     * Runs on-device OCR (ML Kit, free, works offline) on each selected image, extracts
+     * phone-number-like sequences exactly as they appear, and merges the de-duplicated
+     * set into the paste box. Numbers are kept exactly as recognized - nothing is invented.
+     */
+    private fun extractNumbersFromImages(uris: List<Uri>) {
+        Toast.makeText(this, "Processing ${uris.size} image(s)...", Toast.LENGTH_SHORT).show()
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val allNumbers = linkedSetOf<String>()
+        var remaining = uris.size
+
+        uris.forEach { uri ->
+            try {
+                val image = InputImage.fromFilePath(this, uri)
+                recognizer.process(image)
+                    .addOnSuccessListener { visionText ->
+                        allNumbers.addAll(extractPhoneNumbers(visionText.text))
+                        remaining--
+                        if (remaining == 0) onImagesProcessed(allNumbers)
+                    }
+                    .addOnFailureListener {
+                        remaining--
+                        if (remaining == 0) onImagesProcessed(allNumbers)
+                    }
+            } catch (e: Exception) {
+                remaining--
+                if (remaining == 0) onImagesProcessed(allNumbers)
+            }
+        }
+    }
+
+    private fun extractPhoneNumbers(text: String): Set<String> {
+        val regex = Regex("(\\+?\\d[\\d\\-\\s]{8,14}\\d)")
+        val results = linkedSetOf<String>()
+        regex.findAll(text).forEach { match ->
+            val cleaned = match.value.replace(Regex("[\\s-]"), "")
+            val digitsOnly = cleaned.replace("+", "")
+            if (digitsOnly.length in 10..13 && digitsOnly.all { it.isDigit() }) {
+                results.add(cleaned)
+            }
+        }
+        return results
+    }
+
+    private fun onImagesProcessed(numbers: Set<String>) {
+        runOnUiThread {
+            if (numbers.isEmpty()) {
+                Toast.makeText(this, "No numbers found in the image(s)", Toast.LENGTH_SHORT).show()
+                return@runOnUiThread
+            }
+            val existing = binding.etNumbers.text.toString()
+            val newText = numbers.joinToString("\n")
+            val merged = if (existing.isBlank()) newText else "$existing\n$newText"
+            binding.etNumbers.setText(merged)
+            Toast.makeText(this, "${numbers.size} number(s) found (duplicates auto-removed), now tap 'Load List'", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -153,7 +253,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         }
 
         if (parsedLeads.isEmpty()) {
-            Toast.makeText(this, "Koi valid number nahi mila", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No valid numbers found", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -170,28 +270,41 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         }
 
         binding.tvDuplicateInfo.text = if (duplicates.isNotEmpty())
-            "${duplicates.size} duplicate number(s) mile aur remove kar diye gaye." else ""
+            "${duplicates.size} duplicate number(s) found and removed." else ""
 
-        val alreadyCalledCount = deduped.count { callLogStore.allCalledPhones().contains(it.phone) }
+        val alreadyCalledPhones = callLogStore.allCalledPhones()
+        val neverCalled = deduped.filter { !alreadyCalledPhones.contains(it.phone) }
+        val alreadyCalledCount = deduped.size - neverCalled.size
         if (alreadyCalledCount > 0) {
             val existing = binding.tvDuplicateInfo.text.toString()
-            val warning = "$alreadyCalledCount number(s) pehle bhi call ho chuke hain (Sheets me check karo)."
+            val warning = "$alreadyCalledCount number(s) were already called before and have been excluded."
             binding.tvDuplicateInfo.text = if (existing.isEmpty()) warning else "$existing\n$warning"
         }
 
-        engine.loadLeads(deduped, "Session ${System.currentTimeMillis()}")
+        if (neverCalled.isEmpty()) {
+            Toast.makeText(this, "All these numbers have already been called before", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        engine.loadLeads(neverCalled, "Session ${System.currentTimeMillis()}")
         adapter.setLeads(engine.leads)
         refreshDashboard()
-        binding.tvStatus.text = "Status: ${deduped.size} numbers loaded"
+        binding.tvStatus.text = "Status: ${neverCalled.size} numbers loaded"
     }
 
     private fun onStartClicked() {
+        hideKeyboard()
+        if (!subscriptionManager.hasAccess()) {
+            Toast.makeText(this, "Trial/subscription expired - activate a plan in the Plan section", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, SubscriptionActivity::class.java))
+            return
+        }
         if (engine.leads.isEmpty()) {
-            Toast.makeText(this, "Pehle list load karo", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Load a list first", Toast.LENGTH_SHORT).show()
             return
         }
         if (!binding.cbConsent.isChecked) {
-            Toast.makeText(this, "Pehle consent checkbox confirm karo", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Confirm the consent checkbox first", Toast.LENGTH_SHORT).show()
             return
         }
         val missing = requiredPermissions.any {
@@ -199,7 +312,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         }
         if (missing) {
             requestNeededPermissions()
-            Toast.makeText(this, "Call permission chahiye", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Call permission is required", Toast.LENGTH_SHORT).show()
             return
         }
         val batchText = binding.etBatchTarget.text.toString().trim()
@@ -207,25 +320,123 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         engine.start()
     }
 
-    private fun selectOutcomeAndHide(tag: OutcomeTag) {
+    private fun selectOutcomeAndHide(outcomeId: String) {
         binding.overlayOutcome.visibility = android.view.View.GONE
-        engine.selectOutcome(tag)
+        engine.selectOutcome(outcomeId)
     }
 
-    /** Adds a colored glow shadow to the 4 outcome boxes on Android 9+ (API 28+). */
-    private fun applyGlowShadows() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-            val map = listOf(
-                binding.btnOutcomeResume to android.graphics.Color.parseColor("#2E7CF6"),
-                binding.btnOutcomeNo to android.graphics.Color.parseColor("#FF3B5C"),
-                binding.btnOutcomePositive to android.graphics.Color.parseColor("#2ED47A"),
-                binding.btnOutcomeInfo to android.graphics.Color.parseColor("#FFB020")
-            )
-            for ((view, color) in map) {
-                view.outlineAmbientShadowColor = color
-                view.outlineSpotShadowColor = color
+    /**
+     * Builds the outcome overlay buttons at runtime (2 per row) from whatever outcomes
+     * currently exist (4 defaults + any custom ones the user added). This is what lets
+     * the layout adjust automatically instead of being stuck at a fixed 4 boxes.
+     */
+    private fun renderOutcomeOverlay() {
+        val container = binding.outcomeButtonsContainer
+        container.removeAllViews()
+        val outcomes = outcomeStore.allOutcomes()
+
+        outcomes.chunked(2).forEach { rowOutcomes ->
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+            }
+            rowOutcomes.forEachIndexed { i, outcome ->
+                val button = android.widget.TextView(this).apply {
+                    text = outcome.label.uppercase()
+                    setTextColor(outcome.textColor())
+                    textSize = 18f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    gravity = android.view.Gravity.CENTER
+                    val bg = android.graphics.drawable.GradientDrawable()
+                    bg.cornerRadius = dp(18).toFloat()
+                    bg.setColor(outcome.color())
+                    background = bg
+                    elevation = dp(16).toFloat()
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        outlineAmbientShadowColor = outcome.color()
+                        outlineSpotShadowColor = outcome.color()
+                    }
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        0, android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 1f
+                    ).apply {
+                        if (i == 0) marginEnd = dp(6) else marginStart = dp(6)
+                    }
+                    setOnClickListener { selectOutcomeAndHide(outcome.id) }
+                }
+                row.addView(button)
+            }
+            container.addView(row)
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun showManageOutcomesDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_manage_outcomes, null)
+        val etLabel = dialogView.findViewById<android.widget.EditText>(R.id.etNewOutcomeLabel)
+        val btnAdd = dialogView.findViewById<android.widget.TextView>(R.id.btnAddOutcome)
+        val existingContainer = dialogView.findViewById<android.widget.LinearLayout>(R.id.existingOutcomesContainer)
+        val btnClose = dialogView.findViewById<android.widget.TextView>(R.id.btnCloseManageOutcomes)
+
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+
+        fun refreshList() {
+            existingContainer.removeAllViews()
+            outcomeStore.customOutcomes().forEach { outcome ->
+                val row = android.widget.LinearLayout(this).apply {
+                    orientation = android.widget.LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(6), 0, dp(6))
+                }
+                val badge = android.widget.TextView(this).apply {
+                    text = outcome.label
+                    setTextColor(outcome.textColor())
+                    val bg = android.graphics.drawable.GradientDrawable()
+                    bg.cornerRadius = dp(20).toFloat()
+                    bg.setColor(outcome.color())
+                    background = bg
+                    setPadding(dp(12), dp(6), dp(12), dp(6))
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                    )
+                }
+                val remove = android.widget.TextView(this).apply {
+                    text = "Remove"
+                    setTextColor(android.graphics.Color.parseColor("#FF3B5C"))
+                    textSize = 12f
+                    setPadding(dp(10), dp(6), dp(10), dp(6))
+                    setOnClickListener {
+                        outcomeStore.deleteCustom(outcome.id)
+                        refreshList()
+                        renderOutcomeOverlay()
+                    }
+                }
+                row.addView(badge)
+                row.addView(remove)
+                existingContainer.addView(row)
             }
         }
+        refreshList()
+
+        btnAdd.setOnClickListener {
+            val label = etLabel.text.toString()
+            val added = outcomeStore.addCustom(label)
+            if (added != null) {
+                etLabel.setText("")
+                refreshList()
+                renderOutcomeOverlay()
+                Toast.makeText(this, "'${added.label}' added", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Enter a label", Toast.LENGTH_SHORT).show()
+            }
+        }
+        btnClose.setOnClickListener { dialog.dismiss() }
+
+        dialog.show()
     }
 
     private fun refreshDashboard() {
@@ -255,20 +466,31 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             val label = if (lead.name.isNullOrBlank()) lead.phone else "${lead.name}\n${lead.phone}"
             binding.tvCurrentLead.text = "Calling: $label"
             binding.tvStatus.text = "Status: Calling ${index + 1}/${engine.leads.size}"
+            binding.btnFloatingStop.visibility = android.view.View.VISIBLE
         }
     }
 
     override fun onCallEndedAwaitingOutcome(index: Int) {
         runOnUiThread {
-            binding.tvStatus.text = "Status: Call khatam - option chuno"
+            binding.tvStatus.text = "Status: Call ended - choose an option"
+            hideKeyboard()
             binding.overlayOutcome.visibility = android.view.View.VISIBLE
+        }
+    }
+
+    private fun hideKeyboard() {
+        currentFocus?.let { focusedView ->
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(focusedView.windowToken, 0)
+            focusedView.clearFocus()
         }
     }
 
     override fun onBatchComplete(callsDone: Int) {
         runOnUiThread {
-            binding.tvStatus.text = "Status: Batch complete ($callsDone calls). 'Start' dabao aage jane ke liye."
-            Toast.makeText(this, "Target ke $callsDone calls ho gaye. Aage jaari rakhne ke liye Start dabao.", Toast.LENGTH_LONG).show()
+            binding.tvStatus.text = "Status: Batch complete ($callsDone calls). Tap 'Start' to continue."
+            binding.btnFloatingStop.visibility = android.view.View.GONE
+            Toast.makeText(this, "Target of $callsDone calls reached. Tap Start to continue.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -277,21 +499,26 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     }
 
     override fun onSessionResumed() {
-        runOnUiThread { binding.tvStatus.text = "Status: Resumed" }
+        runOnUiThread {
+            binding.tvStatus.text = "Status: Resumed"
+            binding.btnFloatingStop.visibility = android.view.View.VISIBLE
+        }
     }
 
     override fun onSessionStopped() {
         runOnUiThread {
             binding.tvStatus.text = "Status: Stopped"
             binding.overlayOutcome.visibility = android.view.View.GONE
+            binding.btnFloatingStop.visibility = android.view.View.GONE
         }
     }
 
     override fun onSessionComplete() {
         runOnUiThread {
-            binding.tvStatus.text = "Status: List khatam ho gayi"
+            binding.tvStatus.text = "Status: List complete"
             binding.tvCurrentLead.text = "No active call"
             binding.overlayOutcome.visibility = android.view.View.GONE
+            binding.btnFloatingStop.visibility = android.view.View.GONE
         }
     }
 
@@ -317,11 +544,16 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             if (!allGranted) {
                 Toast.makeText(
                     this,
-                    "Call aur Phone State permission zaruri hai app chalne ke liye",
+                    "Call and Phone State permission are required for the app to work",
                     Toast.LENGTH_LONG
                 ).show()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        subscriptionManager.refreshStatusInBackground()
     }
 
     override fun onDestroy() {

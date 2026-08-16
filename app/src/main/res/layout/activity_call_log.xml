@@ -6,19 +6,35 @@
     android:background="@color/bg_dark"
     android:padding="16dp">
 
-    <TextView
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Call Sheets (Day-wise)"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary_dark"
-        android:textSize="18sp"/>
+        android:orientation="vertical"
+        android:background="@drawable/bg_hero_gradient"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Call Sheets"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Day-wise call records"
+            android:textColor="#D8CCF5"
+            android:textSize="12sp"/>
+    </LinearLayout>
 
     <Spinner
         android:id="@+id/spinnerDay"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"/>
+        android:layout_marginTop="14dp"/>
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -79,6 +95,6 @@
         android:padding="24dp"
         android:textColor="@color/text_muted_dark"
         android:visibility="gone"
-        android:text="Is din koi call log nahi hai"/>
+        android:text="No call logs for this day"/>
 
 </LinearLayout>

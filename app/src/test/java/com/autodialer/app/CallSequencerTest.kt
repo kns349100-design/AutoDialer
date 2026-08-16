@@ -106,4 +106,36 @@ class CallSequencerTest {
         assertNull(seq.advance())
         assertTrue(seq.isComplete())
     }
+
+    @Test
+    fun `continueSequence resumes after stop without re-dialing completed numbers`() {
+        val seq = CallSequencer(3)
+        seq.start()                 // dials 0
+        seq.onCallEnded()           // 0 -> COMPLETED
+        seq.advance()               // dials 1
+        seq.stop()                  // user pressed Stop mid-call
+        assertNull(seq.advance())   // stopped - nothing should happen
+
+        // User pressed Start again - must continue from number 1, not re-dial number 0.
+        val next = seq.continueSequence()
+        assertEquals(1, next)
+        assertEquals(CallSequencer.Status.COMPLETED, seq.statuses[0])
+        assertEquals(CallSequencer.Status.CALLING, seq.statuses[1])
+        assertFalse(seq.stopped)
+    }
+
+    @Test
+    fun `continueSequence never re-dials an already completed number`() {
+        val seq = CallSequencer(3)
+        seq.start()
+        seq.onCallEnded() // 0 completed
+        seq.advance()     // dials 1
+        seq.onCallEnded() // 1 completed
+        seq.stop()
+
+        val next = seq.continueSequence()
+        assertEquals(2, next) // must skip straight to the only remaining PENDING number
+        assertEquals(CallSequencer.Status.COMPLETED, seq.statuses[0])
+        assertEquals(CallSequencer.Status.COMPLETED, seq.statuses[1])
+    }
 }

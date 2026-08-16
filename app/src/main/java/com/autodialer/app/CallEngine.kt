@@ -103,12 +103,12 @@ class CallEngine(
     fun start() {
         val seq = sequencer
         if (seq == null || leads.isEmpty()) {
-            listener.onEngineError("List khali hai")
+            listener.onEngineError("List is empty")
             return
         }
         registerListener()
         callsDialedThisBatch = 0
-        val index = if (seq.currentIndex == -1) seq.start() else seq.resume()
+        val index = if (seq.currentIndex == -1) seq.start() else seq.continueSequence()
         if (index != null) {
             dial(index)
         } else if (seq.isComplete()) {
@@ -205,17 +205,17 @@ class CallEngine(
         }
     }
 
-    /** Called the instant the user taps one of the 4 outcome boxes. Dials the next number immediately. */
-    fun selectOutcome(tag: OutcomeTag) {
+    /** Called the instant the user taps one of the outcome boxes. Dials the next number immediately. */
+    fun selectOutcome(outcomeId: String) {
         val seq = sequencer ?: return
         val index = pendingOutcomeIndex ?: return
         if (index in leads.indices) {
-            leads[index].outcome = tag
+            leads[index].outcome = outcomeId
             listener.onLeadUpdated(index, leads[index].status)
             val lead = leads[index]
             callLogStore.addEntry(
                 callLogStore.todayKey(),
-                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Completed", tag.name)
+                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Completed", outcomeId)
             )
         }
         pendingOutcomeIndex = null

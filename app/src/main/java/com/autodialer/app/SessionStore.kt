@@ -8,7 +8,7 @@ data class Lead(
     val name: String?,
     val phone: String,
     var status: CallSequencer.Status = CallSequencer.Status.PENDING,
-    var outcome: OutcomeTag? = null
+    var outcome: String? = null
 )
 
 data class SavedSession(
@@ -35,7 +35,7 @@ class SessionStore(context: Context) {
             obj.put("name", lead.name ?: "")
             obj.put("phone", lead.phone)
             obj.put("status", lead.status.name)
-            obj.put("outcome", lead.outcome?.name ?: "")
+            obj.put("outcome", lead.outcome ?: "")
             leadsArray.put(obj)
         }
         prefs.edit()
@@ -62,7 +62,7 @@ class SessionStore(context: Context) {
             } catch (e: Exception) {
                 CallSequencer.Status.PENDING
             }
-            val outcome = OutcomeTag.fromNameOrNull(obj.optString("outcome", "").ifEmpty { null })
+            val outcome = obj.optString("outcome", "").ifEmpty { null }
             leads.add(Lead(name, phone, status, outcome))
         }
         return SavedSession(

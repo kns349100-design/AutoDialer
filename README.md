@@ -8,6 +8,57 @@
   - Pura din ka sheet bhi delete kar sakte ho ("Delete This Sheet", confirmation ke saath)
 - Naye files: `CallLogStore.kt`, `CallLogActivity.kt`, `CallLogAdapter.kt`, `activity_call_log.xml`, `item_call_log.xml`
 
+## Is version me kya naya hai (v11 — floating Stop button + Stop-then-Start fix)
+
+- **Floating Stop button**: screen ke top-right corner me chota "⏹ Stop" button hamesha visible rehta hai jab calling chal rahi ho (chahe kahin bhi scroll kiya ho) — turant ruk jati hai tap karte hi
+- **Bug fix — Stop ke baad Start**: pehle Stop dabane ke baad "Start" dabane se process resume nahi hota tha. Ab theek se continue hota hai, **jahan se chhoda wahi se** — jin numbers pe pehle hi call ho chuki hai unhe kabhi dobara dial nahi karta (naye unit tests se verify kiya)
+
+## Is version me kya naya hai (v10 — list persistence, keyboard fix, no repeat calls)
+
+- **List ab persist hoti hai**: app band karke dobara kholne pe purani list turant dikhti hai (screen pe hi, tap karne ki zarurat nahi) — sirf tabhi badalti hai jab aap khud naya list load karte ho
+- **Keyboard automatically hide hota hai**: jab call khatam hone ke baad outcome-options wali screen aati hai, keyboard nahi dikhta
+- **Repeat-call prevention**: agar koi number kabhi bhi pehle call ho chuka hai (kisi bhi din), naya list load karte waqt wo number automatically list se **hata diya jata hai** (sirf warning nahi, seedha exclude) — us number pe dobara call nahi jayegi
+
+## Is version me kya naya hai (v9 — Custom Call Options)
+
+- Numbers section ke neeche **"+ Custom Call Option"** button — apna khud ka text likho (jaise "Callback", "Wrong Number"), color app khud assign kar deta hai
+- Custom options bhi **RESUME/NO/POSITIVE/INFO ke saath overlay me automatically dikhte hain** — layout khud adjust hota hai (2 columns me jitne bhi options hon)
+- Custom option **Remove** bhi kar sakte ho (same dialog se)
+- Purana history/call-log data automatically compatible hai (RESUME/NO/POSITIVE/INFO ke IDs same rakhe hain)
+
+## Is version me kya naya hai (v8 — Direct Payment + Image OCR)
+
+- **Direct in-app payment (Razorpay)**: "Plan" screen me ab "Pay Rs 10/300/1000" buttons hain — user seedha UPI/card se pay karta hai, koi code manually batane ki zarurat nahi, payment hote hi automatic unlock. Setup: `RAZORPAY_SETUP.md` follow karo
+- **Image se numbers import (OCR)**: "Image Upload" button — ek ya kai images select karo (screenshot/photo jisme numbers likhe hain), app khud numbers padh ke nikal leta hai (on-device, free, Google ML Kit), exactly wahi numbers jo image me hain, aur duplicate khud hat jate hain
+- Purana coupon-code system bhi maujood hai (backup ke taur pe, agar kabhi manually kisi ko free/discounted access dena ho)
+
+## Is version me kya naya hai (v7 — Phone OTP Login + UI polish)
+
+- **Login screen** ab app khulte hi sabse pehle aata hai — phone number (+91) daalo, OTP aaye, verify karo, tabhi app ke andar jaa sakte ho
+- Firebase (Google ki free service) OTP bhejta hai — **zaroori setup: `FIREBASE_SETUP.md` follow karo**, iske bina login kaam nahi karega
+- Dashboard aur Call Sheets screens ko bhi gradient header diya (poori app me consistent look)
+
+### Poora setup checklist (naye se shuru karke)
+1. `backend/SETUP.md` follow karo (subscription backend, Google Apps Script) → URL milega
+2. Wo URL `SubscriptionManager.kt` ki `SCRIPT_URL` line me daalo
+3. `FIREBASE_SETUP.md` follow karo (login/OTP backend) → project banao, Phone Auth on karo, `google-services.json` download karke `app/google-services.json` replace karo
+4. GitHub pe pehli baar build chalao — Actions log me "Print debug keystore SHA-1" step se SHA1 copy karo, Firebase console me add karo, naya `google-services.json` download karke phir se replace karo
+5. Dubara build chalao, APK download karo, phone pe install karo — ab login screen se shuru hoga
+
+## Is version me kya naya hai (v6 — Subscription system)
+
+- **1 din free trial** automatically first launch se shuru
+- **Server-side license check** (Google Apps Script backend, free) — codes APK ke andar nahi hain, isliye:
+  - Kabhi bhi naya code add kar sakte ho (app rebuild kiye bina)
+  - Kisi bhi ek device/branch ka access turant revoke kar sakte ho
+- **3 coupon codes** (Google Sheet me edit kar sakte ho): `SAPDEAL-FREE` (lifetime free), `SAPDEAL-150`, `SAPDEAL-100` (dono 1 month access)
+- **Monthly (Rs 300) aur Yearly (Rs 1000) plans** — "Plan" screen me dikhte hain
+- **Zaroori setup step**: `backend/SETUP.md` follow karke apna free Google Apps Script backend deploy karo (5-10 min), phir uska URL `SubscriptionManager.kt` ki `SCRIPT_URL` line me daalo — **isके bina subscription system kaam nahi karega**
+
+### Important — honest disclaimer
+- Chunki payment gateway nahi laga hai, payment aap khud manually (UPI/cash) collect karoge, phir company/admin employee ko code de dega
+- Server-side check hone se pehle wale (fully local) system se ye kaafi zyada secure hai, lekin "100% unbreakable" koi bhi software (chahe bank ho) nahi ho sakta — is scale (1000 log) ke liye ye ek reasonable, practical setup hai
+
 ## Is version me kya naya hai (v5 — robustness + export)
 
 - **CSV Export**: Call Sheets screen me "Export CSV" button — kisi bhi din ka data CSV file bana ke WhatsApp/Email/Drive se share ho sakta hai, Excel me khulti hai

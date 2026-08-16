@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Subscription"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary_dark"
+            android:textSize="20sp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_hero_gradient"
+            android:padding="20dp"
+            android:layout_marginTop="16dp">
+
+            <TextView
+                android:id="@+id/tvPlanStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:text="No active plan"/>
+
+            <TextView
+                android:id="@+id/tvTrialInfo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textColor="#D8CCF5"
+                android:textSize="12sp"
+                android:text=""/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="16dp"
+            android:layout_marginTop="14dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Plans"
+                android:textColor="@color/text_primary_dark"
+                android:textStyle="bold"
+                android:textSize="14sp"/>
+
+            <TextView
+                android:id="@+id/btnPay12Hour"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_pill_info"
+                android:gravity="center"
+                android:padding="12dp"
+                android:textColor="@color/info_text"
+                android:textSize="13sp"
+                android:text="Pay Rs 10 — 12 Hours"/>
+
+            <TextView
+                android:id="@+id/btnPayMonthly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_pill_resume"
+                android:gravity="center"
+                android:padding="12dp"
+                android:textColor="@color/resume_text"
+                android:textSize="13sp"
+                android:text="Pay Rs 300 — 1 Month"/>
+
+            <TextView
+                android:id="@+id/btnPayYearly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_pill_positive"
+                android:gravity="center"
+                android:padding="12dp"
+                android:textColor="@color/positive_text"
+                android:textSize="13sp"
+                android:text="Pay Rs 1000 — 1 Year"/>
+
+            <TextView
+                android:id="@+id/tvPaymentResult"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/text_secondary_dark"
+                android:textSize="12sp"
+                android:text=""/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="16dp"
+            android:layout_marginTop="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Redeem Coupon Code"
+                android:textColor="@color/text_primary_dark"
+                android:textStyle="bold"
+                android:textSize="14sp"/>
+
+            <EditText
+                android:id="@+id/etCode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Enter code here"
+                android:textColor="@color/text_primary_dark"
+                android:textColorHint="@color/text_muted_dark"
+                android:background="@drawable/bg_avatar"
+                android:padding="10dp"
+                android:layout_marginTop="8dp"/>
+
+            <TextView
+                android:id="@+id/btnRedeem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_pill_resume"
+                android:gravity="center"
+                android:padding="12dp"
+                android:textColor="@color/resume_text"
+                android:textSize="13sp"
+                android:text="Activate"/>
+
+            <TextView
+                android:id="@+id/tvRedeemResult"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/text_secondary_dark"
+                android:textSize="12sp"
+                android:text=""/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvDeviceId"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textColor="@color/text_muted_dark"
+            android:textSize="10sp"
+            android:text="Device ID: -"/>
+
+    </LinearLayout>
+</ScrollView>

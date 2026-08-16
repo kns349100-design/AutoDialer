@@ -8,7 +8,10 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
-class NumberAdapter(private val leads: MutableList<Lead>) :
+class NumberAdapter(
+    private val leads: MutableList<Lead>,
+    private val outcomeStore: OutcomeStore
+) :
     RecyclerView.Adapter<NumberAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -36,10 +39,10 @@ class NumberAdapter(private val leads: MutableList<Lead>) :
             else Color.parseColor("#D3D1C7")
         )
 
-        val outcome = lead.outcome
+        val outcome = outcomeStore.findById(lead.outcome)
         if (outcome != null) {
             holder.badge.visibility = View.VISIBLE
-            holder.badge.text = outcome.shortTag
+            holder.badge.text = outcome.label
             holder.badge.setTextColor(outcome.textColor())
             val pill = GradientDrawable()
             pill.cornerRadius = 40f

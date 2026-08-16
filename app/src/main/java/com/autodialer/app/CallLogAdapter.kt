@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 
 class CallLogAdapter(
     private val entries: MutableList<CallLogEntry>,
+    private val outcomeStore: OutcomeStore,
     private val onDelete: (Int) -> Unit
 ) : RecyclerView.Adapter<CallLogAdapter.ViewHolder>() {
 
@@ -31,10 +32,10 @@ class CallLogAdapter(
         holder.name.text = if (entry.name.isNullOrBlank()) entry.phone else "${entry.name} — ${entry.phone}"
         holder.status.text = entry.status
 
-        val tag = OutcomeTag.fromNameOrNull(entry.outcome)
+        val tag = outcomeStore.findById(entry.outcome)
         if (tag != null) {
             holder.outcome.visibility = View.VISIBLE
-            holder.outcome.text = tag.shortTag
+            holder.outcome.text = tag.label
             holder.outcome.setTextColor(tag.textColor())
             val pill = GradientDrawable()
             pill.cornerRadius = 40f

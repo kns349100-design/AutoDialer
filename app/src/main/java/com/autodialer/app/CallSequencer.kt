@@ -80,6 +80,19 @@ class CallSequencer(val total: Int) {
         callActive = false
     }
 
+    /**
+     * Continues the sequence from wherever it currently is (whether it was paused
+     * or stopped), skipping any number that's already COMPLETED/SKIPPED. Never
+     * re-dials a number that already has a final status. Safe no-op if a call is
+     * still actively in progress.
+     */
+    fun continueSequence(): Int? {
+        if (callActive) return null
+        stopped = false
+        paused = false
+        return advance()
+    }
+
     /** Skips the current pending/waiting number. Cannot skip a call that is actively in progress. */
     fun skip(): Int? {
         if (callActive) return null

@@ -58,6 +58,20 @@
                     android:textColor="@color/text_primary_dark"
                     android:textSize="11sp"
                     android:text="Dashboard"/>
+
+                <TextView
+                    android:id="@+id/btnSubscription"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_pill_resume"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:textColor="@color/resume_text"
+                    android:textSize="11sp"
+                    android:text="Plan"/>
             </LinearLayout>
 
             <!-- Gradient hero card: session progress -->
@@ -139,7 +153,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="Numbers paste karo (ek line me). Optional naam: Rahul, 9876543210"
+                android:text="Paste numbers here (one per line). Optional name: Rahul, 9876543210"
                 android:textColor="@color/text_muted_dark"
                 android:textSize="12sp"/>
 
@@ -188,18 +202,30 @@
                     android:text="File Upload"/>
 
                 <TextView
-                    android:id="@+id/btnLoadList"
+                    android:id="@+id/btnImportImage"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_pill_resume"
+                    android:background="@drawable/bg_card"
                     android:gravity="center"
                     android:padding="10dp"
-                    android:textColor="@color/resume_text"
+                    android:textColor="@color/text_secondary_dark"
                     android:textSize="11sp"
-                    android:text="List Load"/>
+                    android:text="Image Upload"/>
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/btnLoadList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_pill_resume"
+                android:gravity="center"
+                android:padding="10dp"
+                android:textColor="@color/resume_text"
+                android:textSize="11sp"
+                android:text="Load List"/>
 
             <TextView
                 android:id="@+id/tvDuplicateInfo"
@@ -223,7 +249,7 @@
                     android:layout_height="wrap_content"
                     android:textColor="@color/text_secondary_dark"
                     android:textSize="12sp"
-                    android:text="Batch target (kitne calls; 0 = sab):"/>
+                    android:text="Batch target (number of calls; 0 = all):"/>
 
                 <EditText
                     android:id="@+id/etBatchTarget"
@@ -244,8 +270,22 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:textColor="@color/text_secondary_dark"
-                android:text="Ye sab consenting/authorized contacts hain"
+                android:text="These are all consenting/authorized contacts"
                 android:textSize="12sp"/>
+
+            <TextView
+                android:id="@+id/btnManageOutcomes"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textColor="@color/text_secondary_dark"
+                android:textSize="11sp"
+                android:text="+ Custom Call Option"/>
 
             <TextView
                 android:id="@+id/tvResumeBanner"
@@ -256,7 +296,7 @@
                 android:background="@drawable/bg_pill_info"
                 android:textColor="@color/info_text"
                 android:visibility="gone"
-                android:text="Pichla session mila - Resume Session dabao"/>
+                android:text="Previous session found - tap to resume"/>
 
             <TextView
                 android:layout_width="wrap_content"
@@ -340,7 +380,8 @@
             android:text="STOP"/>
     </LinearLayout>
 
-    <!-- Full-screen glowing 4-box outcome overlay -->
+    <!-- Full-screen glowing outcome overlay - rows built dynamically at runtime so any
+         number of options (defaults + custom) fit and adjust automatically -->
     <LinearLayout
         android:id="@+id/overlayOutcome"
         android:layout_width="match_parent"
@@ -355,83 +396,36 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
-            android:text="Call khatam — agla option chuno"
+            android:text="Call ended — choose an option"
             android:textColor="@color/text_muted_dark"
             android:textSize="13sp"/>
 
         <LinearLayout
+            android:id="@+id/outcomeButtonsContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/btnOutcomeResume"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="match_parent"
-                android:layout_marginEnd="6dp"
-                android:layout_marginBottom="6dp"
-                android:background="@drawable/bg_glow_box_resume"
-                android:gravity="center"
-                android:elevation="16dp"
-                android:textColor="@color/resume_text"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:text="RESUME"/>
-
-            <TextView
-                android:id="@+id/btnOutcomeNo"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="match_parent"
-                android:layout_marginStart="6dp"
-                android:layout_marginBottom="6dp"
-                android:background="@drawable/bg_glow_box_no"
-                android:gravity="center"
-                android:elevation="16dp"
-                android:textColor="@color/no_text"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:text="NO"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/btnOutcomePositive"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="match_parent"
-                android:layout_marginEnd="6dp"
-                android:layout_marginTop="6dp"
-                android:background="@drawable/bg_glow_box_positive"
-                android:gravity="center"
-                android:elevation="16dp"
-                android:textColor="@color/positive_text"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:text="POSITIVE"/>
-
-            <TextView
-                android:id="@+id/btnOutcomeInfo"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="match_parent"
-                android:layout_marginStart="6dp"
-                android:layout_marginTop="6dp"
-                android:background="@drawable/bg_glow_box_info"
-                android:gravity="center"
-                android:elevation="16dp"
-                android:textColor="@color/info_text"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:text="INFO"/>
-        </LinearLayout>
+            android:orientation="vertical"/>
     </LinearLayout>
+
+    <!-- Small always-visible floating Stop button - stays on top regardless of scroll,
+         so the calling process can be stopped instantly from anywhere on screen -->
+    <TextView
+        android:id="@+id/btnFloatingStop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="16dp"
+        android:background="@drawable/bg_pill_no"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:textColor="@color/no_text"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:elevation="10dp"
+        android:visibility="gone"
+        android:text="⏹ Stop"/>
 
 </FrameLayout>

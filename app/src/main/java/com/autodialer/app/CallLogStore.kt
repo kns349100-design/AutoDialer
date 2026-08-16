@@ -12,7 +12,8 @@ data class CallLogEntry(
     val name: String?,
     val phone: String,
     val status: String,
-    val outcome: String?
+    val outcome: String?,
+    val note: String? = null
 )
 
 /**
