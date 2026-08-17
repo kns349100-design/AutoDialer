@@ -64,13 +64,6 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val authStore = AuthStore(this)
-        if (!authStore.isLoggedIn()) {
-            startActivity(Intent(this, LoginActivity::class.java))
-            finish()
-            return
-        }
-
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -294,11 +287,6 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
     private fun onStartClicked() {
         hideKeyboard()
-        if (!subscriptionManager.hasAccess()) {
-            Toast.makeText(this, "Trial/subscription expired - activate a plan in the Plan section", Toast.LENGTH_LONG).show()
-            startActivity(Intent(this, SubscriptionActivity::class.java))
-            return
-        }
         if (engine.leads.isEmpty()) {
             Toast.makeText(this, "Load a list first", Toast.LENGTH_SHORT).show()
             return
