@@ -62,17 +62,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             }
         }
 
-    private lateinit var authManager: AuthManager
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        authManager = AuthManager(this)
-        if (!authManager.isLoggedIn()) {
-            startActivity(Intent(this, LoginActivity::class.java))
-            finish()
-            return
-        }
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -663,15 +654,6 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     override fun onResume() {
         super.onResume()
         subscriptionManager.refreshStatusInBackground()
-        authManager.checkSessionInBackground {
-            runOnUiThread {
-                Toast.makeText(this, "Logged out - this account was used on another device", Toast.LENGTH_LONG).show()
-                authManager.logout()
-                engine.stop()
-                startActivity(Intent(this, LoginActivity::class.java))
-                finish()
-            }
-        }
     }
 
     override fun onDestroy() {
