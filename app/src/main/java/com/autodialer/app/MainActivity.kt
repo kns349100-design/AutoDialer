@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     private lateinit var subscriptionManager: SubscriptionManager
     private lateinit var outcomeStore: OutcomeStore
     private lateinit var engine: CallEngine
+    private lateinit var infoMessageStore: InfoMessageStore
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.CALL_PHONE,
@@ -61,11 +62,13 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             }
         }
 
+    private lateinit var authManager: AuthManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val authStore = AuthStore(this)
-        if (!authStore.isLoggedIn()) {
+        authManager = AuthManager(this)
+        if (!authManager.isLoggedIn()) {
             startActivity(Intent(this, LoginActivity::class.java))
             finish()
             return
@@ -78,6 +81,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         callLogStore = CallLogStore(this)
         subscriptionManager = SubscriptionManager(this)
         outcomeStore = OutcomeStore(this)
+        infoMessageStore = InfoMessageStore(this)
         subscriptionManager.ensureFirstLaunchRecorded()
         subscriptionManager.refreshStatusInBackground()
         engine = CallEngine(this, sessionStore, callLogStore, this)
@@ -107,6 +111,17 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             startActivity(Intent(this, SubscriptionActivity::class.java))
         }
         binding.btnManageOutcomes.setOnClickListener { showManageOutcomesDialog() }
+        binding.btnRemoveList.setOnClickListener { confirmRemoveList() }
+
+        setLoadButtonActive(false)
+        binding.etNumbers.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                // List changed since the last Load - go back to light until user taps Load again.
+                setLoadButtonActive(false)
+            }
+        })
 
         // Outcome overlay buttons are built dynamically (see renderOutcomeOverlay) so any
         // number of default + custom options fit and adjust automatically.
@@ -120,6 +135,13 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 binding.tvResumeBanner.visibility = android.view.View.VISIBLE
                 binding.tvResumeBanner.text = "Previous list restored - tap 'Start' to continue calling it"
                 binding.tvStatus.text = "Status: ${engine.leads.size} numbers restored from last session"
+                // If a call had ended but its outcome was never tagged (Stop pressed, app
+                // closed, crash, etc.), ask for it right away - don't wait for Start.
+                if (engine.pendingLead() != null) {
+                    binding.tvStatus.text = "Status: Call ended - choose an option (from before)"
+                    hideKeyboard()
+                    binding.overlayOutcome.visibility = android.view.View.VISIBLE
+                }
             }
         }
     }
@@ -234,7 +256,20 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         }
     }
 
+    private fun setLoadButtonActive(active: Boolean) {
+        val drawableRes = if (active) R.drawable.bg_pill_load_active else R.drawable.bg_pill_load_idle
+        binding.btnLoadList.background = androidx.core.content.ContextCompat.getDrawable(this, drawableRes)
+    }
+
     private fun loadNumbersFromInput() {
+        if (engine.hasActiveList()) {
+            Toast.makeText(
+                this,
+                "Aaj ki list abhi khatam nahi hui hai. Pehle usse poora karo ya 'Remove Current List' se hatao.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         val raw = binding.etNumbers.text.toString()
         val rawLines = raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -272,17 +307,17 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.tvDuplicateInfo.text = if (duplicates.isNotEmpty())
             "${duplicates.size} duplicate number(s) found and removed." else ""
 
-        val alreadyCalledPhones = callLogStore.allCalledPhones()
+        val alreadyCalledPhones = callLogStore.calledPhonesWithinDays(60)
         val neverCalled = deduped.filter { !alreadyCalledPhones.contains(it.phone) }
         val alreadyCalledCount = deduped.size - neverCalled.size
         if (alreadyCalledCount > 0) {
             val existing = binding.tvDuplicateInfo.text.toString()
-            val warning = "$alreadyCalledCount number(s) were already called before and have been excluded."
+            val warning = "$alreadyCalledCount number(s) called in the last 2 months have been excluded."
             binding.tvDuplicateInfo.text = if (existing.isEmpty()) warning else "$existing\n$warning"
         }
 
         if (neverCalled.isEmpty()) {
-            Toast.makeText(this, "All these numbers have already been called before", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "All these numbers were already called in the last 2 months", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -290,6 +325,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         adapter.setLeads(engine.leads)
         refreshDashboard()
         binding.tvStatus.text = "Status: ${neverCalled.size} numbers loaded"
+        setLoadButtonActive(true)
     }
 
     private fun onStartClicked() {
@@ -320,9 +356,79 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         engine.start()
     }
 
+    private fun confirmRemoveList() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Remove current list?")
+            .setMessage("Numbers already called stay recorded in the sheet. Remaining un-called numbers in this list will be discarded.")
+            .setPositiveButton("Remove") { _, _ ->
+                engine.removeCurrentList()
+                clearListUi()
+                Toast.makeText(this, "List removed", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Resets the number-entry UI so a fresh list can be pasted/loaded. */
+    private fun clearListUi() {
+        binding.etNumbers.setText("")
+        binding.tvDuplicateInfo.text = ""
+        adapter.setLeads(engine.leads)
+        binding.tvCurrentLead.text = "No active call"
+        binding.overlayOutcome.visibility = android.view.View.GONE
+        binding.btnFloatingStop.visibility = android.view.View.GONE
+        binding.tvResumeBanner.visibility = android.view.View.GONE
+        setLoadButtonActive(false)
+        refreshDashboard()
+    }
+
     private fun selectOutcomeAndHide(outcomeId: String) {
         binding.overlayOutcome.visibility = android.view.View.GONE
+        if (outcomeId == Outcome.INFO.id) {
+            engine.pendingLead()?.let { openWhatsAppWithMessage(it.phone) }
+        }
         engine.selectOutcome(outcomeId)
+    }
+
+    /** Opens WhatsApp directly on this number's chat with the info message pre-filled (editable, just needs Send). */
+    private fun openWhatsAppWithMessage(phone: String) {
+        val digits = phone.filter { it.isDigit() }
+        val withCountryCode = when {
+            digits.length == 10 -> "91$digits"
+            digits.length == 11 && digits.startsWith("0") -> "91${digits.substring(1)}"
+            else -> digits
+        }
+        val message = infoMessageStore.getMessage()
+        val encodedMessage = java.net.URLEncoder.encode(message, "UTF-8")
+        val uri = Uri.parse("https://wa.me/$withCountryCode?text=$encodedMessage")
+        val intent = Intent(Intent.ACTION_VIEW, uri)
+        intent.setPackage("com.whatsapp")
+        try {
+            startActivity(intent)
+        } catch (e: android.content.ActivityNotFoundException) {
+            // WhatsApp not installed under that package (e.g. WhatsApp Business) - fall back to generic view
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, uri))
+            } catch (e2: android.content.ActivityNotFoundException) {
+                Toast.makeText(this, "WhatsApp not found", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** Long-press the INFO button to edit the pre-filled message template. */
+    private fun showEditInfoMessageDialog() {
+        val editText = android.widget.EditText(this)
+        editText.setText(infoMessageStore.getMessage())
+        editText.setPadding(48, 32, 48, 32)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Info message (WhatsApp)")
+            .setView(editText)
+            .setPositiveButton("Save") { _, _ ->
+                infoMessageStore.setMessage(editText.text.toString())
+                Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /**
@@ -364,6 +470,9 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                         if (i == 0) marginEnd = dp(6) else marginStart = dp(6)
                     }
                     setOnClickListener { selectOutcomeAndHide(outcome.id) }
+                    if (outcome.id == Outcome.INFO.id) {
+                        setOnLongClickListener { showEditInfoMessageDialog(); true }
+                    }
                 }
                 row.addView(button)
             }
@@ -450,6 +559,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.progressBar.max = if (total > 0) total else 1
         binding.progressBar.progress = completed + skipped
         binding.tvSessionName.text = "Session: $total numbers loaded"
+        binding.btnRemoveList.visibility =
+            if (engine.hasActiveList()) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     // ---------- CallEngineListener ----------
@@ -515,10 +626,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
     override fun onSessionComplete() {
         runOnUiThread {
-            binding.tvStatus.text = "Status: List complete"
-            binding.tvCurrentLead.text = "No active call"
-            binding.overlayOutcome.visibility = android.view.View.GONE
-            binding.btnFloatingStop.visibility = android.view.View.GONE
+            binding.tvStatus.text = "Status: List complete - all numbers moved to sheet"
+            clearListUi()
         }
     }
 
@@ -554,6 +663,15 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     override fun onResume() {
         super.onResume()
         subscriptionManager.refreshStatusInBackground()
+        authManager.checkSessionInBackground {
+            runOnUiThread {
+                Toast.makeText(this, "Logged out - this account was used on another device", Toast.LENGTH_LONG).show()
+                authManager.logout()
+                engine.stop()
+                startActivity(Intent(this, LoginActivity::class.java))
+                finish()
+            }
+        }
     }
 
     override fun onDestroy() {

@@ -62,7 +62,7 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultListener {
             options.put("currency", "INR")
             options.put("amount", amountPaise)
             val prefill = JSONObject()
-            val phone = AuthStore(this).phoneNumber()
+            val phone = AuthManager(this).phoneNumber()
             if (phone.isNotEmpty()) prefill.put("contact", phone)
             options.put("prefill", prefill)
             checkout.open(this, options)

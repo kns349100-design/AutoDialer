@@ -3,9 +3,10 @@
 ## Step 1 - Google Sheet banao
 1. sheets.google.com pe jao, naya blank sheet banao
 2. Naam do: "AutoDialer Licenses"
-3. Neeche 2 tabs banao (bottom-left "+" se):
+3. Neeche 3 tabs banao (bottom-left "+" se):
    - Tab 1 naam: `Codes`
    - Tab 2 naam: `Activations`
+   - Tab 3 naam: `Users`
 
 ## Step 2 - "Codes" tab me headers aur data daalo
 Row 1 (headers), phir apne 4 codes:
@@ -26,6 +27,14 @@ Row 1:
 |---|---|---|---|---|---|
 
 (Baaki rows khud-ba-khud bharegi jab log codes redeem karenge - inhe manually edit mat karna, sirf kisi ek device ko band karna ho to uski row ke "Revoked" column me TRUE likh dena.)
+
+## Step 3.5 - "Users" tab me sirf headers daalo
+Row 1 (ye login system ke liye hai - phone number + PIN, koi SMS/billing nahi lagti):
+
+| Phone | PinHash | ActiveDeviceId | UpdatedAt |
+|---|---|---|---|
+
+(Baaki rows khud-ba-khud bharegi jab log pehli baar login karke apna PIN set karenge. Kisi ek number ko manually logout/reset karna ho to uski row delete kar do - agli baar wo number naya PIN set kar payega.)
 
 ## Step 4 - Apps Script attach karo
 1. Sheet ke top menu me **Extensions -> Apps Script**

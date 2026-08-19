@@ -16,7 +16,11 @@ data class SavedSession(
     val leads: List<Lead>,
     val currentIndex: Int,
     val delaySeconds: Int,
-    val batchTarget: Int = 0
+    val batchTarget: Int = 0,
+    /** -1 means "no call is awaiting an outcome tag". */
+    val pendingOutcomeIndex: Int = -1,
+    val pendingLogDate: String? = null,
+    val pendingLogIndex: Int = -1
 )
 
 /**
@@ -44,6 +48,9 @@ class SessionStore(context: Context) {
             .putInt("currentIndex", session.currentIndex)
             .putInt("delaySeconds", session.delaySeconds)
             .putInt("batchTarget", session.batchTarget)
+            .putInt("pendingOutcomeIndex", session.pendingOutcomeIndex)
+            .putString("pendingLogDate", session.pendingLogDate ?: "")
+            .putInt("pendingLogIndex", session.pendingLogIndex)
             .putBoolean("hasSession", true)
             .apply()
     }
@@ -70,7 +77,10 @@ class SessionStore(context: Context) {
             leads = leads,
             currentIndex = prefs.getInt("currentIndex", -1),
             delaySeconds = prefs.getInt("delaySeconds", 2),
-            batchTarget = prefs.getInt("batchTarget", 0)
+            batchTarget = prefs.getInt("batchTarget", 0),
+            pendingOutcomeIndex = prefs.getInt("pendingOutcomeIndex", -1),
+            pendingLogDate = prefs.getString("pendingLogDate", "")?.ifEmpty { null },
+            pendingLogIndex = prefs.getInt("pendingLogIndex", -1)
         )
     }
 

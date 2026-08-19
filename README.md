@@ -8,6 +8,22 @@
   - Pura din ka sheet bhi delete kar sakte ho ("Delete This Sheet", confirmation ke saath)
 - Naye files: `CallLogStore.kt`, `CallLogActivity.kt`, `CallLogAdapter.kt`, `activity_call_log.xml`, `item_call_log.xml`
 
+## Is version me kya naya hai (v13 — Free Phone+PIN login, Firebase hataya)
+
+- **Firebase poori tarah hata diya gaya hai** — koi Blaze plan, koi billing, koi card add karne ki zarurat nahi
+- **Naya free login**: Phone number + 4-digit PIN (SMS nahi bhejta, isliye 100% free)
+  - Pehli baar jo PIN daaloge wahi permanently us number ka PIN ban jata hai
+  - "Forgot PIN?" se bina purana PIN jaane naya set kar sakte ho
+  - **Ek number = ek hi device**: agar same number se doosre phone me login karte ho, pehle wale device pe automatically logout ho jata hai (app har baar resume hone pe check karti hai)
+- Same Google Apps Script backend use hota hai jo subscription ke liye hai — **`backend/SETUP.md` me ek naya "Users" tab add karna hoga** (Step 3.5), baaki setup same hai
+- `FIREBASE_SETUP.md` file hata di gayi hai (ab zarurat nahi)
+
+## Is version me kya naya hai (v12 — Sheet grouping + manual Collected mark)
+
+- **Call Sheets ab groups me dikhti hai**: Resume sabse upar, phir Positive, phir baaki defaults (Info, No), phir custom options, aur untagged sabse neeche
+- **"Mark Collected" button**: sirf Resume-tagged numbers ke aage dikhta hai — jab aap khud WhatsApp check karke confirm kar lo ki reply/resume aa gaya, ek tap se green "✓ Collected" ho jata hai
+- ⚠️ Ye **manual hai, automatic nahi** — koi bhi app bina official WhatsApp Business API (jo Meta business verification maangti hai) ke ye khud-ba-khud detect nahi kar sakti ki WhatsApp pe reply aaya ya nahi. Automatic detection ke liye kisi aur ki notifications padhna padega jo privacy-invasive hai — wo nahi banaya
+
 ## Is version me kya naya hai (v11 — floating Stop button + Stop-then-Start fix)
 
 - **Floating Stop button**: screen ke top-right corner me chota "⏹ Stop" button hamesha visible rehta hai jab calling chal rahi ho (chahe kahin bhi scroll kiya ho) — turant ruk jati hai tap karte hi

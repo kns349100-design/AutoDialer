@@ -10,7 +10,8 @@ import androidx.recyclerview.widget.RecyclerView
 class CallLogAdapter(
     private val entries: MutableList<CallLogEntry>,
     private val outcomeStore: OutcomeStore,
-    private val onDelete: (Int) -> Unit
+    private val onDelete: (Int) -> Unit,
+    private val onToggleCollected: (Int) -> Unit
 ) : RecyclerView.Adapter<CallLogAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -18,6 +19,7 @@ class CallLogAdapter(
         val name: TextView = view.findViewById(R.id.tvLogName)
         val status: TextView = view.findViewById(R.id.tvLogStatus)
         val outcome: TextView = view.findViewById(R.id.tvLogOutcome)
+        val collected: TextView = view.findViewById(R.id.tvCollected)
         val delete: TextView = view.findViewById(R.id.tvDeleteRow)
     }
 
@@ -43,6 +45,30 @@ class CallLogAdapter(
             holder.outcome.background = pill
         } else {
             holder.outcome.visibility = View.GONE
+        }
+
+        // Manual "Collected" mark - only relevant for Resume-tagged entries, since that's
+        // the outcome you'd be following up on via WhatsApp. Toggled by hand, not automatic.
+        if (tag?.id == Outcome.RESUME.id) {
+            holder.collected.visibility = View.VISIBLE
+            if (entry.collected) {
+                holder.collected.text = "✓ Collected"
+                val bg = GradientDrawable()
+                bg.cornerRadius = 40f
+                bg.setColor(android.graphics.Color.parseColor("#2ED47A"))
+                holder.collected.background = bg
+                holder.collected.setTextColor(android.graphics.Color.parseColor("#06341A"))
+            } else {
+                holder.collected.text = "Mark Collected"
+                val bg = GradientDrawable()
+                bg.cornerRadius = 40f
+                bg.setColor(android.graphics.Color.parseColor("#2C2C2A"))
+                holder.collected.background = bg
+                holder.collected.setTextColor(android.graphics.Color.parseColor("#B4B2A9"))
+            }
+            holder.collected.setOnClickListener { onToggleCollected(position) }
+        } else {
+            holder.collected.visibility = View.GONE
         }
 
         holder.delete.setOnClickListener { onDelete(position) }

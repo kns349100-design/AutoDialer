@@ -13,7 +13,8 @@ data class CallLogEntry(
     val phone: String,
     val status: String,
     val outcome: String?,
-    val note: String? = null
+    val note: String? = null,
+    val collected: Boolean = false
 )
 
 /**
@@ -29,13 +30,24 @@ class CallLogStore(context: Context) {
     fun todayKey(): String = dayFormat.format(Date())
     fun nowTime(): String = timeFormat.format(Date())
 
-    fun addEntry(date: String, entry: CallLogEntry) {
+    /** Adds an entry and returns the index it was stored at, so it can be updated later. */
+    fun addEntry(date: String, entry: CallLogEntry): Int {
         val day = loadDay(date).toMutableList()
         day.add(entry)
         saveDay(date, day)
         val days = getDays().toMutableSet()
         days.add(date)
         prefs.edit().putStringSet("days", days).apply()
+        return day.size - 1
+    }
+
+    /** Updates the status/outcome of an already-logged entry (used to fill in the outcome once tagged, without adding a duplicate row). */
+    fun updateEntry(date: String, index: Int, status: String, outcome: String?) {
+        val day = loadDay(date).toMutableList()
+        if (index in day.indices) {
+            day[index] = day[index].copy(status = status, outcome = outcome ?: day[index].outcome)
+            saveDay(date, day)
+        }
     }
 
     /** Days with at least one logged call, most recent first. */
@@ -57,7 +69,9 @@ class CallLogStore(context: Context) {
                         name = obj.optString("name", "").ifEmpty { null },
                         phone = obj.optString("phone", ""),
                         status = obj.optString("status", ""),
-                        outcome = obj.optString("outcome", "").ifEmpty { null }
+                        outcome = obj.optString("outcome", "").ifEmpty { null },
+                        note = obj.optString("note", "").ifEmpty { null },
+                        collected = obj.optBoolean("collected", false)
                     )
                 )
             }
@@ -73,6 +87,17 @@ class CallLogStore(context: Context) {
         return getDays().flatMap { loadDay(it) }.map { it.phone }.toSet()
     }
 
+    /** Phone numbers logged within the last [days] days (default 60 ~ 2 months), for auto-excluding recent calls when loading a new list. */
+    fun calledPhonesWithinDays(days: Int): Set<String> {
+        val cutoff = Date(Date().time - days.toLong() * 24 * 60 * 60 * 1000)
+        val cutoffKey = dayFormat.format(cutoff)
+        return getDays()
+            .filter { it >= cutoffKey }
+            .flatMap { loadDay(it) }
+            .map { it.phone }
+            .toSet()
+    }
+
     private fun saveDay(date: String, entries: List<CallLogEntry>) {
         val array = JSONArray()
         entries.forEach { e ->
@@ -82,9 +107,20 @@ class CallLogStore(context: Context) {
             obj.put("phone", e.phone)
             obj.put("status", e.status)
             obj.put("outcome", e.outcome ?: "")
+            obj.put("note", e.note ?: "")
+            obj.put("collected", e.collected)
             array.put(obj)
         }
         prefs.edit().putString("day_$date", array.toString()).apply()
+    }
+
+    /** Toggles the manual "Collected" mark on one row (e.g. after checking WhatsApp yourself). */
+    fun toggleCollected(date: String, index: Int) {
+        val day = loadDay(date).toMutableList()
+        if (index in day.indices) {
+            day[index] = day[index].copy(collected = !day[index].collected)
+            saveDay(date, day)
+        }
     }
 
     /** Deletes a single row from a day's sheet. */

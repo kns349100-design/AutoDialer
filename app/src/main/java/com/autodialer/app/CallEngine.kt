@@ -40,6 +40,10 @@ class CallEngine(
     /** Index of the lead whose call just ended and is waiting for the user to tag an outcome. */
     private var pendingOutcomeIndex: Int? = null
 
+    /** The call-log row created the instant a number is dialed, so it counts as "called" even if no outcome ever gets tagged (app closed, crash, Stop pressed, etc). */
+    private var pendingLogDate: String? = null
+    private var pendingLogIndex: Int? = null
+
     private val telephonyManager =
         activity.getSystemService(Activity.TELEPHONY_SERVICE) as TelephonyManager
     private val handler = Handler(Looper.getMainLooper())
@@ -81,6 +85,14 @@ class CallEngine(
             }
             sequencer!!.statuses[i] = leads[i].status
         }
+        // Restore any outcome that was still waiting to be tagged when the app was
+        // stopped/closed last time, so the user gets asked for it again before anything
+        // else can be dialed - it must never get silently skipped.
+        if (saved.pendingOutcomeIndex >= 0 && saved.pendingOutcomeIndex in leads.indices) {
+            pendingOutcomeIndex = saved.pendingOutcomeIndex
+            pendingLogDate = saved.pendingLogDate
+            pendingLogIndex = if (saved.pendingLogIndex >= 0) saved.pendingLogIndex else null
+        }
         listener.onLog("Session restored: $sessionName (auto-dial NOT triggered)")
         return true
     }
@@ -106,14 +118,21 @@ class CallEngine(
             listener.onEngineError("List is empty")
             return
         }
+        // A previous call is still waiting for an outcome tag (Resume/Positive/etc) - this can
+        // happen if Stop was pressed, or the app was closed/killed, right after a call ended.
+        // Never dial the next number until that one is tagged.
+        if (pendingOutcomeIndex != null) {
+            registerListener()
+            listener.onCallEndedAwaitingOutcome(pendingOutcomeIndex!!)
+            return
+        }
         registerListener()
         callsDialedThisBatch = 0
         val index = if (seq.currentIndex == -1) seq.start() else seq.continueSequence()
         if (index != null) {
             dial(index)
         } else if (seq.isComplete()) {
-            unregisterListener()
-            listener.onSessionComplete()
+            finishSession()
         }
     }
 
@@ -129,7 +148,9 @@ class CallEngine(
         sequencer?.stop()
         handler.removeCallbacksAndMessages(null)
         unregisterListener()
-        pendingOutcomeIndex = null
+        // Deliberately NOT clearing pendingOutcomeIndex here: if a call ended and its outcome
+        // hasn't been tagged yet, Stop must not lose that. The next Start (even after the app
+        // was fully closed) will ask for that outcome again before dialing anything else.
         listener.onSessionStopped()
         persist()
     }
@@ -146,11 +167,19 @@ class CallEngine(
             }
         }
         if (leadForLog != null) {
-            callLogStore.addEntry(
-                callLogStore.todayKey(),
-                CallLogEntry(callLogStore.nowTime(), leadForLog.name, leadForLog.phone, "Skipped", null)
-            )
+            val date = pendingLogDate
+            val logIndex = pendingLogIndex
+            if (date != null && logIndex != null) {
+                callLogStore.updateEntry(date, logIndex, "Skipped", null)
+            } else {
+                callLogStore.addEntry(
+                    callLogStore.todayKey(),
+                    CallLogEntry(callLogStore.nowTime(), leadForLog.name, leadForLog.phone, "Skipped", null)
+                )
+            }
         }
+        pendingLogDate = null
+        pendingLogIndex = null
         if (result != null) dial(result)
         persist()
     }
@@ -174,6 +203,16 @@ class CallEngine(
         try {
             activity.startActivity(intent)
             callsDialedThisBatch += 1
+            // Log the number as "called" right now, at dial time - not after an outcome is
+            // picked. This is what keeps it out of future lists even if the outcome never
+            // gets tagged (app closed mid-call, Stop pressed, crash, etc).
+            val date = callLogStore.todayKey()
+            val logIndex = callLogStore.addEntry(
+                date,
+                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Dialed", null)
+            )
+            pendingLogDate = date
+            pendingLogIndex = logIndex
         } catch (e: SecurityException) {
             listener.onEngineError("Call permission missing")
             stop()
@@ -205,6 +244,12 @@ class CallEngine(
         }
     }
 
+    /** The lead currently awaiting an outcome tag (call just ended, box still on screen). */
+    fun pendingLead(): Lead? {
+        val index = pendingOutcomeIndex ?: return null
+        return leads.getOrNull(index)
+    }
+
     /** Called the instant the user taps one of the outcome boxes. Dials the next number immediately. */
     fun selectOutcome(outcomeId: String) {
         val seq = sequencer ?: return
@@ -212,13 +257,21 @@ class CallEngine(
         if (index in leads.indices) {
             leads[index].outcome = outcomeId
             listener.onLeadUpdated(index, leads[index].status)
-            val lead = leads[index]
-            callLogStore.addEntry(
-                callLogStore.todayKey(),
-                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Completed", outcomeId)
-            )
+            val date = pendingLogDate
+            val logIndex = pendingLogIndex
+            if (date != null && logIndex != null) {
+                callLogStore.updateEntry(date, logIndex, "Completed", outcomeId)
+            } else {
+                val lead = leads[index]
+                callLogStore.addEntry(
+                    callLogStore.todayKey(),
+                    CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Completed", outcomeId)
+                )
+            }
         }
         pendingOutcomeIndex = null
+        pendingLogDate = null
+        pendingLogIndex = null
         persist()
 
         if (batchTarget > 0 && callsDialedThisBatch >= batchTarget) {
@@ -232,9 +285,45 @@ class CallEngine(
         if (next != null) {
             dial(next)
         } else {
-            unregisterListener()
-            listener.onSessionComplete()
+            finishSession()
         }
+    }
+
+    /** True while there's a loaded list that isn't fully finished yet (still has numbers to
+     * call, or a call is waiting for its outcome to be tagged). Used to stop a new list from
+     * being loaded on top of one that's still in progress, and to know when to show
+     * "Remove Current List". */
+    fun hasActiveList(): Boolean {
+        if (leads.isEmpty()) return false
+        if (pendingOutcomeIndex != null) return true
+        return leads.any { it.status == CallSequencer.Status.PENDING || it.status == CallSequencer.Status.CALLING }
+    }
+
+    /** Discards the currently loaded list entirely (user doesn't want these numbers anymore).
+     * Numbers already dialed stay correctly recorded in the call log/sheet either way. */
+    fun removeCurrentList() {
+        unregisterListener()
+        handler.removeCallbacksAndMessages(null)
+        leads = mutableListOf()
+        sequencer = null
+        pendingOutcomeIndex = null
+        pendingLogDate = null
+        pendingLogIndex = null
+        sessionStore.clear()
+    }
+
+    /** Called once every number in the list has a final status (Completed/Skipped). Clears the
+     * list automatically - it has already been logged number-by-number in the call log/sheet
+     * as each call happened, so nothing is lost. */
+    private fun finishSession() {
+        unregisterListener()
+        leads = mutableListOf()
+        sequencer = null
+        pendingOutcomeIndex = null
+        pendingLogDate = null
+        pendingLogIndex = null
+        sessionStore.clear()
+        listener.onSessionComplete()
     }
 
     fun persist() {
@@ -245,7 +334,10 @@ class CallEngine(
                 leads = leads,
                 currentIndex = seq.currentIndex,
                 delaySeconds = 0,
-                batchTarget = batchTarget
+                batchTarget = batchTarget,
+                pendingOutcomeIndex = pendingOutcomeIndex ?: -1,
+                pendingLogDate = pendingLogDate,
+                pendingLogIndex = pendingLogIndex ?: -1
             )
         )
     }

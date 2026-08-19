@@ -38,12 +38,11 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="with Phone Number"
+            android:text="with Phone Number + PIN"
             android:textColor="#8A8FA3"
             android:textSize="13sp"/>
 
         <LinearLayout
-            android:id="@+id/phoneSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
@@ -81,11 +80,35 @@
                 android:textSize="15sp"/>
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/btnSendOtp"
+        <EditText
+            android:id="@+id/etPin"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="12dp"
+            android:inputType="numberPassword"
+            android:maxLength="4"
+            android:hint="4-digit PIN"
+            android:textColor="#16213E"
+            android:textColorHint="#B0B5C4"
+            android:textSize="18sp"
+            android:letterSpacing="0.3"
+            android:gravity="center"
+            android:background="@drawable/bg_input_light"
+            android:padding="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="First time? This PIN will be set as yours."
+            android:textColor="#8A8FA3"
+            android:textSize="11sp"/>
+
+        <TextView
+            android:id="@+id/btnLogin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:background="@drawable/bg_login_button"
             android:gravity="center"
             android:padding="16dp"
@@ -94,21 +117,45 @@
             android:textSize="15sp"
             android:text="Log In"/>
 
+        <TextView
+            android:id="@+id/btnForgotPin"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="Forgot PIN?"
+            android:textColor="#2E7CF6"
+            android:textSize="13sp"/>
+
         <LinearLayout
-            android:id="@+id/otpSection"
+            android:id="@+id/resetSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:visibility="gone"
-            android:layout_marginTop="20dp">
+            android:layout_marginTop="18dp">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#E3E8F2"
+                android:layout_marginBottom="14dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Set a new PIN"
+                android:textColor="#16213E"
+                android:textStyle="bold"
+                android:textSize="14sp"/>
 
             <EditText
-                android:id="@+id/etOtp"
+                android:id="@+id/etNewPin"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="number"
-                android:maxLength="6"
-                android:hint="Enter 6-digit OTP"
+                android:layout_marginTop="10dp"
+                android:inputType="numberPassword"
+                android:maxLength="4"
+                android:hint="New 4-digit PIN"
                 android:textColor="#16213E"
                 android:textColorHint="#B0B5C4"
                 android:textSize="18sp"
@@ -118,17 +165,17 @@
                 android:padding="16dp"/>
 
             <TextView
-                android:id="@+id/btnVerifyOtp"
+                android:id="@+id/btnResetPin"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="10dp"
                 android:background="@drawable/bg_login_button"
                 android:gravity="center"
                 android:padding="16dp"
                 android:textColor="#FFFFFF"
                 android:textStyle="bold"
                 android:textSize="15sp"
-                android:text="Verify OTP"/>
+                android:text="Reset PIN"/>
         </LinearLayout>
 
         <TextView

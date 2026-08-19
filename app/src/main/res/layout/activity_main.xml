@@ -220,12 +220,25 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:background="@drawable/bg_pill_resume"
+                android:background="@drawable/bg_pill_load_idle"
                 android:gravity="center"
                 android:padding="10dp"
                 android:textColor="@color/resume_text"
                 android:textSize="11sp"
                 android:text="Load List"/>
+
+            <TextView
+                android:id="@+id/btnRemoveList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_pill_remove_list"
+                android:gravity="center"
+                android:padding="10dp"
+                android:textColor="@color/no_bg"
+                android:textSize="11sp"
+                android:visibility="gone"
+                android:text="Remove Current List"/>
 
             <TextView
                 android:id="@+id/tvDuplicateInfo"

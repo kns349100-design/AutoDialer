@@ -19,6 +19,10 @@
  *   DeviceId | Code | ActivatedAt | ExpiryAt | PlanType | Revoked
  *   (this tab is filled automatically by the script - don't edit rows,
  *    except to set Revoked = TRUE on a row to cut off one device/branch)
+ *
+ * Tab "Users" (row 1 = headers) - for phone number + PIN login
+ *   Phone | PinHash | ActiveDeviceId | UpdatedAt
+ *   (filled automatically by the script - don't edit rows manually)
  */
 
 function doGet(e) {
@@ -26,6 +30,9 @@ function doGet(e) {
   if (action === 'redeem') return handleRedeem(e);
   if (action === 'check') return handleCheck(e);
   if (action === 'verifyPayment') return handleVerifyPayment(e);
+  if (action === 'login') return handleLogin(e);
+  if (action === 'resetPin') return handleResetPin(e);
+  if (action === 'checkSession') return handleCheckSession(e);
   return jsonResponse({ status: 'error', message: 'unknown action' });
 }
 
@@ -176,4 +183,109 @@ function jsonResponse(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * ---- Phone number + PIN login (free, no SMS, no billing) ----
+ * First login for a phone number registers that PIN. After that, the same PIN
+ * must be entered. Logging in successfully on a new device automatically makes
+ * that the only active device for the number (older device gets signed out).
+ */
+
+function hashPin(pin) {
+  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, pin);
+  var hex = raw.map(function (b) {
+    var v = (b < 0) ? b + 256 : b;
+    var h = v.toString(16);
+    return h.length === 1 ? '0' + h : h;
+  }).join('');
+  return hex;
+}
+
+function getUsersSheet() {
+  return getSheet('Users');
+}
+
+function findUserRow(sheet, phone) {
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === phone) return i + 1; // 1-indexed sheet row
+  }
+  return -1;
+}
+
+function handleLogin(e) {
+  var phone = String(e.parameter.phone || '').trim();
+  var pin = String(e.parameter.pin || '').trim();
+  var deviceId = String(e.parameter.deviceId || '').trim();
+
+  if (!phone || !pin || !deviceId) {
+    return jsonResponse({ status: 'error', message: 'missing params' });
+  }
+  if (pin.length !== 4 || !/^[0-9]{4}$/.test(pin)) {
+    return jsonResponse({ status: 'error', message: 'PIN must be 4 digits' });
+  }
+
+  var sheet = getUsersSheet();
+  var rowNum = findUserRow(sheet, phone);
+  var pinHash = hashPin(pin);
+  var now = Date.now();
+
+  if (rowNum === -1) {
+    // First time this number has ever logged in - this PIN becomes their PIN.
+    sheet.appendRow([phone, pinHash, deviceId, now]);
+    return jsonResponse({ status: 'ok', registered: true });
+  }
+
+  var row = sheet.getRange(rowNum, 1, 1, 4).getValues()[0];
+  if (String(row[1]) !== pinHash) {
+    return jsonResponse({ status: 'error', message: 'Wrong PIN' });
+  }
+
+  // Correct PIN - this device becomes the one and only active device for this number.
+  sheet.getRange(rowNum, 3).setValue(deviceId);
+  sheet.getRange(rowNum, 4).setValue(now);
+  return jsonResponse({ status: 'ok', registered: false });
+}
+
+function handleResetPin(e) {
+  var phone = String(e.parameter.phone || '').trim();
+  var newPin = String(e.parameter.newPin || '').trim();
+  var deviceId = String(e.parameter.deviceId || '').trim();
+
+  if (!phone || !newPin || !deviceId) {
+    return jsonResponse({ status: 'error', message: 'missing params' });
+  }
+  if (newPin.length !== 4 || !/^[0-9]{4}$/.test(newPin)) {
+    return jsonResponse({ status: 'error', message: 'PIN must be 4 digits' });
+  }
+
+  var sheet = getUsersSheet();
+  var rowNum = findUserRow(sheet, phone);
+  var pinHash = hashPin(newPin);
+  var now = Date.now();
+
+  if (rowNum === -1) {
+    sheet.appendRow([phone, pinHash, deviceId, now]);
+  } else {
+    sheet.getRange(rowNum, 2).setValue(pinHash);
+    sheet.getRange(rowNum, 3).setValue(deviceId);
+    sheet.getRange(rowNum, 4).setValue(now);
+  }
+  return jsonResponse({ status: 'ok' });
+}
+
+function handleCheckSession(e) {
+  var phone = String(e.parameter.phone || '').trim();
+  var deviceId = String(e.parameter.deviceId || '').trim();
+  if (!phone || !deviceId) {
+    return jsonResponse({ status: 'error', message: 'missing params' });
+  }
+
+  var sheet = getUsersSheet();
+  var rowNum = findUserRow(sheet, phone);
+  if (rowNum === -1) return jsonResponse({ status: 'not_found' });
+
+  var activeDeviceId = sheet.getRange(rowNum, 3).getValue();
+  return jsonResponse({ status: 'ok', active: String(activeDeviceId) === deviceId });
 }

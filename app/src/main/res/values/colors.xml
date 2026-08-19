@@ -15,6 +15,8 @@
     <color name="positive_text">#06341A</color>
     <color name="info_bg">#FFB020</color>
     <color name="info_text">#412402</color>
+    <color name="load_bg_idle">#1B3A66</color>
+    <color name="load_bg_active">#2E7CF6</color>
 
     <color name="progress_track">#2C2C2A</color>
     <color name="progress_fill">#2ED47A</color>
