@@ -26,7 +26,7 @@ class SubscriptionManager(private val context: Context) {
 
     companion object {
         // TODO: replace with your deployed Apps Script Web App URL
-        const val SCRIPT_URL = "PASTE_YOUR_APPS_SCRIPT_URL_HERE"
+        const val SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyHEnFWqibZeO774YRKcdlyWb_EgOWyFAi8gmiFDkbajNZQo5TiIL18yOdLp3g1KY9v/exec"
 
         // TODO: replace with your real Razorpay Key ID (safe to embed - it's the PUBLIC key)
         const val RAZORPAY_KEY_ID = "PASTE_YOUR_RAZORPAY_KEY_ID_HERE"
