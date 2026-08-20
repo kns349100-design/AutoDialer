@@ -16,7 +16,7 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- Top bar -->
+            <!-- Top bar: settings gear (top-left) | title | load-list icon (top-right) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -24,360 +24,240 @@
                 android:gravity="center_vertical">
 
                 <TextView
+                    android:id="@+id/btnSettings"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:background="@drawable/bg_avatar"
+                    android:gravity="center"
+                    android:textColor="@color/text_primary_dark"
+                    android:textSize="19sp"
+                    android:text="⚙"/>
+
+                <TextView
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
                     android:text="AutoDialer"
                     android:textStyle="bold"
                     android:textColor="@color/text_primary_dark"
-                    android:textSize="18sp"/>
+                    android:textSize="19sp"/>
 
                 <TextView
-                    android:id="@+id/btnSheets"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/bg_avatar"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="8dp"
-                    android:textColor="@color/text_primary_dark"
-                    android:textSize="11sp"
-                    android:text="Sheets"/>
-
-                <TextView
-                    android:id="@+id/btnDashboard"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
+                    android:id="@+id/btnLoadListTop"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
                     android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_avatar"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="8dp"
-                    android:textColor="@color/text_primary_dark"
-                    android:textSize="11sp"
-                    android:text="Dashboard"/>
-
-                <TextView
-                    android:id="@+id/btnSubscription"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_pill_resume"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="8dp"
+                    android:background="@drawable/bg_pill_load_idle"
+                    android:gravity="center"
                     android:textColor="@color/resume_text"
-                    android:textSize="11sp"
-                    android:text="Plan"/>
+                    android:textSize="17sp"
+                    android:text="⬇"/>
             </LinearLayout>
 
-            <!-- Gradient hero card: session progress -->
+            <!-- 3 boxes: Paste / File / Image -->
             <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_hero_gradient"
-                android:padding="20dp"
-                android:layout_marginTop="14dp">
-
-                <TextView
-                    android:id="@+id/tvSessionName"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="#D8CCF5"
-                    android:textSize="12sp"
-                    android:text="Session: (not started)"/>
-
-                <TextView
-                    android:id="@+id/tvProgress"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="#FFFFFF"
-                    android:textStyle="bold"
-                    android:textSize="30sp"
-                    android:text="0 / 0"/>
-
-                <ProgressBar
-                    android:id="@+id/progressBar"
-                    style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="match_parent"
-                    android:layout_height="6dp"
-                    android:layout_marginTop="14dp"
-                    android:progressTint="#FFFFFF"
-                    android:progressBackgroundTint="#40FFFFFF"
-                    android:max="100"
-                    android:progress="0"/>
-
-                <TextView
-                    android:id="@+id/tvCounts"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:textColor="#D8CCF5"
-                    android:textSize="12sp"
-                    android:text="Pending: 0  Completed: 0  Skipped: 0"/>
-            </LinearLayout>
-
-            <!-- Current call card -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_card"
-                android:padding="16dp"
-                android:layout_marginTop="12dp">
-
-                <TextView
-                    android:id="@+id/tvCurrentLead"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textStyle="bold"
-                    android:textColor="@color/text_primary_dark"
-                    android:textSize="18sp"
-                    android:text="No active call"/>
-
-                <TextView
-                    android:id="@+id/tvStatus"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/text_secondary_dark"
-                    android:text="Status: Ready"/>
-            </LinearLayout>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="Paste numbers here (one per line). Optional name: Rahul, 9876543210"
-                android:textColor="@color/text_muted_dark"
-                android:textSize="12sp"/>
-
-            <EditText
-                android:id="@+id/etNumbers"
-                android:layout_width="match_parent"
-                android:layout_height="120dp"
-                android:gravity="top|start"
-                android:hint="9876543210&#10;Rahul, 9123456780&#10;..."
-                android:inputType="textMultiLine"
-                android:background="@drawable/bg_card"
-                android:textColor="@color/text_primary_dark"
-                android:textColorHint="@color/text_muted_dark"
-                android:padding="12dp"
-                android:layout_marginTop="6dp"/>
-
-            <LinearLayout
+                android:id="@+id/rowImportBoxes"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="8dp">
+                android:layout_marginTop="26dp">
 
-                <TextView
+                <LinearLayout
                     android:id="@+id/btnPasteClipboard"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
                     android:gravity="center"
-                    android:padding="10dp"
-                    android:textColor="@color/text_secondary_dark"
-                    android:textSize="11sp"
-                    android:text="Paste Clipboard"/>
+                    android:background="@drawable/bg_card"
+                    android:padding="18dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="24sp"
+                        android:text="📋"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textColor="@color/text_primary_dark"
+                        android:textSize="12sp"
+                        android:text="Paste"/>
+                </LinearLayout>
 
-                <TextView
+                <LinearLayout
                     android:id="@+id/btnImportFile"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
                     android:gravity="center"
-                    android:padding="10dp"
-                    android:textColor="@color/text_secondary_dark"
-                    android:textSize="11sp"
-                    android:text="File Upload"/>
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/bg_card"
+                    android:padding="18dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="24sp"
+                        android:text="📁"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textColor="@color/text_primary_dark"
+                        android:textSize="12sp"
+                        android:text="File"/>
+                </LinearLayout>
 
-                <TextView
+                <LinearLayout
                     android:id="@+id/btnImportImage"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
                     android:gravity="center"
-                    android:padding="10dp"
-                    android:textColor="@color/text_secondary_dark"
-                    android:textSize="11sp"
-                    android:text="Image Upload"/>
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/bg_card"
+                    android:padding="18dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="24sp"
+                        android:text="🖼"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textColor="@color/text_primary_dark"
+                        android:textSize="12sp"
+                        android:text="Image"/>
+                </LinearLayout>
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/btnLoadList"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:background="@drawable/bg_pill_load_idle"
-                android:gravity="center"
-                android:padding="10dp"
-                android:textColor="@color/resume_text"
-                android:textSize="11sp"
-                android:text="Load List"/>
-
-            <TextView
-                android:id="@+id/btnRemoveList"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:background="@drawable/bg_pill_remove_list"
-                android:gravity="center"
-                android:padding="10dp"
-                android:textColor="@color/no_bg"
-                android:textSize="11sp"
-                android:visibility="gone"
-                android:text="Remove Current List"/>
-
-            <TextView
-                android:id="@+id/tvDuplicateInfo"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:textColor="@color/no_bg"
-                android:textSize="11sp"
-                android:text=""/>
-
+            <!-- List summary box: appears only when a list is loaded. Shows total vs called
+                 count (or "Calling: ..." while a call is live), and a cross icon to remove the
+                 list. This NEVER disappears on its own - only when the cross is tapped
+                 (with confirmation) or the whole list finishes. -->
             <LinearLayout
+                android:id="@+id/llListSummary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_card"
+                android:padding="14dp"
                 android:layout_marginTop="14dp"
-                android:gravity="center_vertical">
+                android:visibility="gone">
 
                 <TextView
+                    android:id="@+id/tvListSummaryCount"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/text_secondary_dark"
-                    android:textSize="12sp"
-                    android:text="Batch target (number of calls; 0 = all):"/>
-
-                <EditText
-                    android:id="@+id/etBatchTarget"
-                    android:layout_width="70dp"
-                    android:layout_height="wrap_content"
-                    android:inputType="number"
-                    android:hint="0"
                     android:textColor="@color/text_primary_dark"
-                    android:textColorHint="@color/text_muted_dark"
-                    android:background="@drawable/bg_card"
-                    android:padding="8dp"
-                    android:gravity="center"/>
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:text="0 numbers • 0 called"/>
+
+                <TextView
+                    android:id="@+id/btnRemoveList"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/bg_pill_remove_list"
+                    android:gravity="center"
+                    android:textColor="@color/no_bg"
+                    android:textStyle="bold"
+                    android:textSize="16sp"
+                    android:text="✕"/>
             </LinearLayout>
 
-            <CheckBox
-                android:id="@+id/cbConsent"
+            <!-- Paste box: only shown before a list is loaded (this is where numbers land
+                 after Paste/File/Image, and can be hand-edited before tapping the load icon). -->
+            <LinearLayout
+                android:id="@+id/llPasteArea"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:textColor="@color/text_secondary_dark"
-                android:text="These are all consenting/authorized contacts"
-                android:textSize="12sp"/>
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Paste numbers here (one per line). Optional name: Rahul, 9876543210"
+                    android:textColor="@color/text_muted_dark"
+                    android:textSize="12sp"/>
+
+                <EditText
+                    android:id="@+id/etNumbers"
+                    android:layout_width="match_parent"
+                    android:layout_height="120dp"
+                    android:gravity="top|start"
+                    android:hint="9876543210&#10;Rahul, 9123456780&#10;..."
+                    android:inputType="textMultiLine"
+                    android:background="@drawable/bg_card"
+                    android:textColor="@color/text_primary_dark"
+                    android:textColorHint="@color/text_muted_dark"
+                    android:padding="12dp"
+                    android:layout_marginTop="6dp"/>
+
+                <TextView
+                    android:id="@+id/tvDuplicateInfo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/no_bg"
+                    android:textSize="11sp"
+                    android:text=""/>
+            </LinearLayout>
 
             <TextView
-                android:id="@+id/btnManageOutcomes"
+                android:id="@+id/tvNumbersLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_card"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:textColor="@color/text_secondary_dark"
-                android:textSize="11sp"
-                android:text="+ Custom Call Option"/>
-
-            <TextView
-                android:id="@+id/tvResumeBanner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:padding="10dp"
-                android:background="@drawable/bg_pill_info"
-                android:textColor="@color/info_text"
-                android:visibility="gone"
-                android:text="Previous session found - tap to resume"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="Numbers"
-                android:textColor="@color/text_primary_dark"
+                android:layout_marginTop="20dp"
+                android:text="NUMBERS"
+                android:textColor="@color/text_muted_dark"
                 android:textStyle="bold"
-                android:textSize="14sp"/>
+                android:letterSpacing="0.05"
+                android:textSize="12sp"
+                android:visibility="gone"/>
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rvNumbers"
                 android:layout_width="match_parent"
-                android:layout_height="300dp"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"
                 android:layout_marginTop="8dp"/>
 
         </LinearLayout>
     </ScrollView>
 
-    <!-- Fixed bottom dock: primary call controls (matches reference app's bottom nav pattern) -->
+    <!-- Fixed bottom dock: only Start / Stop, and only visible once a list is loaded. -->
     <LinearLayout
+        android:id="@+id/dockControls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:orientation="horizontal"
         android:background="@drawable/bg_dock"
         android:padding="12dp"
-        android:gravity="center">
+        android:gravity="center"
+        android:visibility="gone">
 
         <TextView
             android:id="@+id/btnStart"
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="4dp"
+            android:layout_marginEnd="6dp"
             android:background="@drawable/bg_dock_icon_resume"
             android:gravity="center"
             android:padding="14dp"
             android:textColor="@color/resume_text"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:text="Start"/>
-
-        <TextView
-            android:id="@+id/btnPause"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/bg_dock_icon"
-            android:gravity="center"
-            android:padding="14dp"
-            android:textColor="@color/text_secondary_dark"
-            android:textSize="12sp"
-            android:text="Pause"/>
-
-        <TextView
-            android:id="@+id/btnSkip"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/bg_dock_icon"
-            android:gravity="center"
-            android:padding="14dp"
-            android:textColor="@color/text_secondary_dark"
-            android:textSize="12sp"
-            android:text="Skip"/>
 
         <TextView
             android:id="@+id/btnStop"
@@ -388,7 +268,7 @@
             android:gravity="center"
             android:padding="14dp"
             android:textColor="@color/no_text"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:text="STOP"/>
     </LinearLayout>

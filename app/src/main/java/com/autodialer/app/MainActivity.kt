@@ -30,6 +30,15 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     private lateinit var outcomeStore: OutcomeStore
     private lateinit var engine: CallEngine
     private lateinit var infoMessageStore: InfoMessageStore
+    private lateinit var authManager: AuthManager
+
+    // True right after we've sent the user to WhatsApp for the INFO outcome - the next call is
+    // dialed only once they actually come back to the app (onResume), i.e. after tapping Send.
+    private var pendingInfoOutcome = false
+
+    // Optional cap on how many calls to dial in one batch. Set via Settings > Batch Limit.
+    // 0 = unlimited (dial the whole list).
+    private var batchTargetPref = 0
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.CALL_PHONE,
@@ -65,6 +74,13 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        authManager = AuthManager(this)
+        if (!authManager.isLoggedIn()) {
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+            return
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -86,22 +102,11 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.btnPasteClipboard.setOnClickListener { pasteFromClipboard() }
         binding.btnImportFile.setOnClickListener { openFilePicker() }
         binding.btnImportImage.setOnClickListener { openImagePicker() }
-        binding.btnLoadList.setOnClickListener { loadNumbersFromInput() }
+        binding.btnLoadListTop.setOnClickListener { loadNumbersFromInput() }
         binding.btnStart.setOnClickListener { onStartClicked() }
-        binding.btnPause.setOnClickListener { engine.pause() }
-        binding.btnSkip.setOnClickListener { engine.skip() }
         binding.btnStop.setOnClickListener { engine.stop() }
         binding.btnFloatingStop.setOnClickListener { engine.stop() }
-        binding.btnDashboard.setOnClickListener {
-            startActivity(Intent(this, HistoryActivity::class.java))
-        }
-        binding.btnSheets.setOnClickListener {
-            startActivity(Intent(this, CallLogActivity::class.java))
-        }
-        binding.btnSubscription.setOnClickListener {
-            startActivity(Intent(this, SubscriptionActivity::class.java))
-        }
-        binding.btnManageOutcomes.setOnClickListener { showManageOutcomesDialog() }
+        binding.btnSettings.setOnClickListener { showSettingsMenu() }
         binding.btnRemoveList.setOnClickListener { confirmRemoveList() }
 
         setLoadButtonActive(false)
@@ -121,15 +126,11 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         if (sessionStore.hasSavedSession()) {
             if (engine.restoreIfAvailable()) {
                 adapter.setLeads(engine.leads)
-                binding.etBatchTarget.setText(if (engine.batchTarget > 0) engine.batchTarget.toString() else "")
                 refreshDashboard()
-                binding.tvResumeBanner.visibility = android.view.View.VISIBLE
-                binding.tvResumeBanner.text = "Previous list restored - tap 'Start' to continue calling it"
-                binding.tvStatus.text = "Status: ${engine.leads.size} numbers restored from last session"
+                Toast.makeText(this, "Previous list restored - tap 'Start' to continue calling it", Toast.LENGTH_LONG).show()
                 // If a call had ended but its outcome was never tagged (Stop pressed, app
                 // closed, crash, etc.), ask for it right away - don't wait for Start.
                 if (engine.pendingLead() != null) {
-                    binding.tvStatus.text = "Status: Call ended - choose an option (from before)"
                     hideKeyboard()
                     binding.overlayOutcome.visibility = android.view.View.VISIBLE
                 }
@@ -174,7 +175,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 val existing = binding.etNumbers.text.toString()
                 val merged = if (existing.isBlank()) content else "$existing\n$content"
                 binding.etNumbers.setText(merged)
-                Toast.makeText(this, "File imported, now tap 'Load List'", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "File imported, now tap the ⬇ icon to load", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Toast.makeText(this, "Could not read file: ${e.message}", Toast.LENGTH_LONG).show()
@@ -243,20 +244,60 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             val newText = numbers.joinToString("\n")
             val merged = if (existing.isBlank()) newText else "$existing\n$newText"
             binding.etNumbers.setText(merged)
-            Toast.makeText(this, "${numbers.size} number(s) found (duplicates auto-removed), now tap 'Load List'", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "${numbers.size} number(s) found (duplicates auto-removed), now tap the ⬇ icon to load", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun setLoadButtonActive(active: Boolean) {
         val drawableRes = if (active) R.drawable.bg_pill_load_active else R.drawable.bg_pill_load_idle
-        binding.btnLoadList.background = androidx.core.content.ContextCompat.getDrawable(this, drawableRes)
+        binding.btnLoadListTop.background = androidx.core.content.ContextCompat.getDrawable(this, drawableRes)
+    }
+
+    /** Top-left gear icon: Sheets, Dashboard, Plan, Batch Limit, and editing the WhatsApp info message all live here. */
+    private fun showSettingsMenu() {
+        val popup = android.widget.PopupMenu(this, binding.btnSettings)
+        popup.menu.add(0, 1, 0, "Sheets")
+        popup.menu.add(0, 2, 1, "Dashboard")
+        popup.menu.add(0, 3, 2, "Edit Info Message (WhatsApp)")
+        popup.menu.add(0, 4, 3, "Plan / Subscription")
+        popup.menu.add(0, 5, 4, "+ Custom Call Option")
+        popup.menu.add(0, 6, 5, "Batch Limit (calls per session)")
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> startActivity(Intent(this, CallLogActivity::class.java))
+                2 -> startActivity(Intent(this, HistoryActivity::class.java))
+                3 -> showEditInfoMessageDialog()
+                4 -> startActivity(Intent(this, SubscriptionActivity::class.java))
+                5 -> showManageOutcomesDialog()
+                6 -> showBatchLimitDialog()
+            }
+            true
+        }
+        popup.show()
+    }
+
+    private fun showBatchLimitDialog() {
+        val editText = android.widget.EditText(this)
+        editText.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        editText.setText(if (batchTargetPref > 0) batchTargetPref.toString() else "")
+        editText.hint = "0 = no limit (call the whole list)"
+        editText.setPadding(48, 32, 48, 32)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Batch limit")
+            .setView(editText)
+            .setPositiveButton("Save") { _, _ ->
+                batchTargetPref = editText.text.toString().trim().toIntOrNull() ?: 0
+                Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun loadNumbersFromInput() {
         if (engine.hasActiveList()) {
             Toast.makeText(
                 this,
-                "Aaj ki list abhi khatam nahi hui hai. Pehle usse poora karo ya 'Remove Current List' se hatao.",
+                "Aaj ki list abhi khatam nahi hui hai. Pehle usse poora karo ya ✕ se hatao.",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -312,26 +353,31 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             return
         }
 
-        engine.loadLeads(neverCalled, "Session ${System.currentTimeMillis()}")
-        adapter.setLeads(engine.leads)
-        refreshDashboard()
-        binding.tvStatus.text = "Status: ${neverCalled.size} numbers loaded"
-        setLoadButtonActive(true)
+        // Consent confirmation happens once right here at load time, instead of a checkbox
+        // sitting on the main screen at all times.
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Confirm before loading")
+            .setMessage("Are these ${neverCalled.size} numbers all consenting/authorized contacts?")
+            .setPositiveButton("Yes, load list") { _, _ ->
+                engine.loadLeads(neverCalled, "Session ${System.currentTimeMillis()}")
+                adapter.setLeads(engine.leads)
+                refreshDashboard()
+                setLoadButtonActive(true)
+                Toast.makeText(this, "${neverCalled.size} numbers loaded", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun onStartClicked() {
         hideKeyboard()
         if (!subscriptionManager.hasAccess()) {
-            Toast.makeText(this, "Trial/subscription expired - activate a plan in the Plan section", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Trial/subscription expired - activate a plan in Settings > Plan", Toast.LENGTH_LONG).show()
             startActivity(Intent(this, SubscriptionActivity::class.java))
             return
         }
         if (engine.leads.isEmpty()) {
             Toast.makeText(this, "Load a list first", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!binding.cbConsent.isChecked) {
-            Toast.makeText(this, "Confirm the consent checkbox first", Toast.LENGTH_SHORT).show()
             return
         }
         val missing = requiredPermissions.any {
@@ -342,8 +388,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             Toast.makeText(this, "Call permission is required", Toast.LENGTH_SHORT).show()
             return
         }
-        val batchText = binding.etBatchTarget.text.toString().trim()
-        engine.batchTarget = batchText.toIntOrNull() ?: 0
+        engine.batchTarget = batchTargetPref
         engine.start()
     }
 
@@ -365,10 +410,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.etNumbers.setText("")
         binding.tvDuplicateInfo.text = ""
         adapter.setLeads(engine.leads)
-        binding.tvCurrentLead.text = "No active call"
         binding.overlayOutcome.visibility = android.view.View.GONE
         binding.btnFloatingStop.visibility = android.view.View.GONE
-        binding.tvResumeBanner.visibility = android.view.View.GONE
         setLoadButtonActive(false)
         refreshDashboard()
     }
@@ -376,9 +419,19 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     private fun selectOutcomeAndHide(outcomeId: String) {
         binding.overlayOutcome.visibility = android.view.View.GONE
         if (outcomeId == Outcome.INFO.id) {
-            engine.pendingLead()?.let { openWhatsAppWithMessage(it.phone) }
+            // Don't dial the next number yet - open WhatsApp first and wait for the user to
+            // actually tap Send and come back to the app (see onResume). Dialing immediately
+            // here would fire the next call while WhatsApp is still on screen.
+            val lead = engine.pendingLead()
+            if (lead != null) {
+                pendingInfoOutcome = true
+                openWhatsAppWithMessage(lead.phone)
+            } else {
+                engine.selectOutcome(outcomeId)
+            }
+        } else {
+            engine.selectOutcome(outcomeId)
         }
-        engine.selectOutcome(outcomeId)
     }
 
     /** Opens WhatsApp directly on this number's chat with the info message pre-filled (editable, just needs Send). */
@@ -406,7 +459,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         }
     }
 
-    /** Long-press the INFO button to edit the pre-filled message template. */
+    /** Editable from Settings > Edit Info Message. */
     private fun showEditInfoMessageDialog() {
         val editText = android.widget.EditText(this)
         editText.setText(infoMessageStore.getMessage())
@@ -539,19 +592,25 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         dialog.show()
     }
 
+    /**
+     * Drives all the visible state that depends on whether a list is loaded: the paste area
+     * vs. the list-summary+numbers view, the bottom Start/Stop dock, and the count text.
+     */
     private fun refreshDashboard() {
         val leads = engine.leads
         val total = leads.size
         val completed = leads.count { it.status == CallSequencer.Status.COMPLETED }
         val skipped = leads.count { it.status == CallSequencer.Status.SKIPPED }
-        val pending = leads.count { it.status == CallSequencer.Status.PENDING }
-        binding.tvProgress.text = "${completed + skipped} / $total"
-        binding.tvCounts.text = "Pending: $pending  Completed: $completed  Skipped: $skipped"
-        binding.progressBar.max = if (total > 0) total else 1
-        binding.progressBar.progress = completed + skipped
-        binding.tvSessionName.text = "Session: $total numbers loaded"
-        binding.btnRemoveList.visibility =
-            if (engine.hasActiveList()) android.view.View.VISIBLE else android.view.View.GONE
+
+        val hasList = engine.hasActiveList()
+        binding.llListSummary.visibility = if (hasList) android.view.View.VISIBLE else android.view.View.GONE
+        binding.llPasteArea.visibility = if (hasList) android.view.View.GONE else android.view.View.VISIBLE
+        binding.tvNumbersLabel.visibility = if (hasList) android.view.View.VISIBLE else android.view.View.GONE
+        binding.dockControls.visibility = if (hasList) android.view.View.VISIBLE else android.view.View.GONE
+
+        if (hasList) {
+            binding.tvListSummaryCount.text = "$total numbers • ${completed + skipped} called"
+        }
     }
 
     // ---------- CallEngineListener ----------
@@ -565,16 +624,14 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
     override fun onDialing(index: Int, lead: Lead) {
         runOnUiThread {
-            val label = if (lead.name.isNullOrBlank()) lead.phone else "${lead.name}\n${lead.phone}"
-            binding.tvCurrentLead.text = "Calling: $label"
-            binding.tvStatus.text = "Status: Calling ${index + 1}/${engine.leads.size}"
+            val label = if (lead.name.isNullOrBlank()) lead.phone else "${lead.name} (${lead.phone})"
+            binding.tvListSummaryCount.text = "Calling: $label  (${index + 1}/${engine.leads.size})"
             binding.btnFloatingStop.visibility = android.view.View.VISIBLE
         }
     }
 
     override fun onCallEndedAwaitingOutcome(index: Int) {
         runOnUiThread {
-            binding.tvStatus.text = "Status: Call ended - choose an option"
             hideKeyboard()
             binding.overlayOutcome.visibility = android.view.View.VISIBLE
         }
@@ -590,41 +647,39 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
     override fun onBatchComplete(callsDone: Int) {
         runOnUiThread {
-            binding.tvStatus.text = "Status: Batch complete ($callsDone calls). Tap 'Start' to continue."
             binding.btnFloatingStop.visibility = android.view.View.GONE
             Toast.makeText(this, "Target of $callsDone calls reached. Tap Start to continue.", Toast.LENGTH_LONG).show()
+            refreshDashboard()
         }
     }
 
     override fun onSessionPaused() {
-        runOnUiThread { binding.tvStatus.text = "Status: Paused" }
+        runOnUiThread { refreshDashboard() }
     }
 
     override fun onSessionResumed() {
         runOnUiThread {
-            binding.tvStatus.text = "Status: Resumed"
             binding.btnFloatingStop.visibility = android.view.View.VISIBLE
         }
     }
 
     override fun onSessionStopped() {
         runOnUiThread {
-            binding.tvStatus.text = "Status: Stopped"
             binding.overlayOutcome.visibility = android.view.View.GONE
             binding.btnFloatingStop.visibility = android.view.View.GONE
+            refreshDashboard()
         }
     }
 
     override fun onSessionComplete() {
         runOnUiThread {
-            binding.tvStatus.text = "Status: List complete - all numbers moved to sheet"
+            Toast.makeText(this, "List complete - all numbers moved to sheet", Toast.LENGTH_LONG).show()
             clearListUi()
         }
     }
 
     override fun onEngineError(message: String) {
         runOnUiThread {
-            binding.tvStatus.text = "Status: Error - $message"
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }
@@ -654,6 +709,19 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     override fun onResume() {
         super.onResume()
         subscriptionManager.refreshStatusInBackground()
+        if (pendingInfoOutcome) {
+            pendingInfoOutcome = false
+            engine.selectOutcome(Outcome.INFO.id)
+        }
+        authManager.checkSessionInBackground {
+            runOnUiThread {
+                Toast.makeText(this, "Logged out - this account was used on another device", Toast.LENGTH_LONG).show()
+                authManager.logout()
+                engine.stop()
+                startActivity(Intent(this, LoginActivity::class.java))
+                finish()
+            }
+        }
     }
 
     override fun onDestroy() {
