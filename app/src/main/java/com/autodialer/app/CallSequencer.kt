@@ -104,6 +104,20 @@ class CallSequencer(val total: Int) {
         return advance()
     }
 
+    /**
+     * Used by the engine's final duplicate-call safety check: marks the current index as
+     * SKIPPED (without ever having actually dialed it) and moves straight to the next pending
+     * number. Unlike advance(), this doesn't require the call to have "ended" first - there
+     * was no real call here to end.
+     */
+    fun autoSkipCurrentAndAdvance(): Int? {
+        if (currentIndex in statuses.indices) statuses[currentIndex] = Status.SKIPPED
+        callActive = false
+        if (stopped || paused) return null
+        currentIndex = nextPending(currentIndex)
+        return tryBeginCall()
+    }
+
     fun nextPending(from: Int): Int {
         for (i in (from + 1) until total) {
             if (statuses[i] == Status.PENDING) return i

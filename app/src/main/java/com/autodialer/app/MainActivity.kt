@@ -31,6 +31,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     private lateinit var engine: CallEngine
     private lateinit var infoMessageStore: InfoMessageStore
     private lateinit var authManager: AuthManager
+    private lateinit var numberDraftStore: NumberDraftStore
 
     // True right after we've sent the user to WhatsApp for the INFO outcome - the next call is
     // dialed only once they actually come back to the app (onResume), i.e. after tapping Send.
@@ -89,6 +90,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         subscriptionManager = SubscriptionManager(this)
         outcomeStore = OutcomeStore(this)
         infoMessageStore = InfoMessageStore(this)
+        numberDraftStore = NumberDraftStore(this)
         subscriptionManager.ensureFirstLaunchRecorded()
         subscriptionManager.refreshStatusInBackground()
         engine = CallEngine(this, sessionStore, callLogStore, this)
@@ -116,8 +118,19 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             override fun afterTextChanged(s: android.text.Editable?) {
                 // List changed since the last Load - go back to light until user taps Load again.
                 setLoadButtonActive(false)
+                // Always mirror the box into durable storage - this is what survives the app
+                // being killed while an image/file picker is open, and what late-arriving OCR
+                // results are checked against so nothing silently disappears.
+                numberDraftStore.setDraft(s?.toString() ?: "")
             }
         })
+
+        // Restore whatever was in the box before (paste/OCR results not yet loaded into a
+        // list) in case this Activity was recreated - e.g. process killed while picking images.
+        val draft = numberDraftStore.getDraft()
+        if (draft.isNotBlank() && binding.etNumbers.text.isBlank()) {
+            binding.etNumbers.setText(draft)
+        }
 
         // Outcome overlay buttons are built dynamically (see renderOutcomeOverlay) so any
         // number of default + custom options fit and adjust automatically.
@@ -194,57 +207,122 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
      * Runs on-device OCR (ML Kit, free, works offline) on each selected image, extracts
      * phone-number-like sequences exactly as they appear, and merges the de-duplicated
      * set into the paste box. Numbers are kept exactly as recognized - nothing is invented.
+     *
+     * Decoding runs off the main thread and downsamples large images first - full-resolution
+     * screenshots decoded on the UI thread is what was causing the repeated freezing/lag when
+     * a few images were picked at once.
      */
     private fun extractNumbersFromImages(uris: List<Uri>) {
         Toast.makeText(this, "Processing ${uris.size} image(s)...", Toast.LENGTH_SHORT).show()
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val allNumbers = linkedSetOf<String>()
+        var failedCount = 0
         var remaining = uris.size
 
-        uris.forEach { uri ->
-            try {
-                val image = InputImage.fromFilePath(this, uri)
-                recognizer.process(image)
-                    .addOnSuccessListener { visionText ->
-                        allNumbers.addAll(extractPhoneNumbers(visionText.text))
-                        remaining--
-                        if (remaining == 0) onImagesProcessed(allNumbers)
+        Thread {
+            uris.forEach { uri ->
+                try {
+                    val bitmap = decodeSampledBitmap(uri, maxDimension = 2048)
+                    if (bitmap == null) {
+                        synchronized(allNumbers) { failedCount++; remaining-- }
+                        if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                        return@forEach
                     }
-                    .addOnFailureListener {
-                        remaining--
-                        if (remaining == 0) onImagesProcessed(allNumbers)
-                    }
-            } catch (e: Exception) {
-                remaining--
-                if (remaining == 0) onImagesProcessed(allNumbers)
+                    val image = InputImage.fromBitmap(bitmap, 0)
+                    recognizer.process(image)
+                        .addOnSuccessListener { visionText ->
+                            synchronized(allNumbers) {
+                                allNumbers.addAll(extractPhoneNumbers(visionText.text))
+                                remaining--
+                            }
+                            if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                        }
+                        .addOnFailureListener {
+                            synchronized(allNumbers) { failedCount++; remaining-- }
+                            if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                        }
+                } catch (e: Exception) {
+                    synchronized(allNumbers) { failedCount++; remaining-- }
+                    if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                }
             }
+        }.start()
+    }
+
+    /** Decodes a URI to a Bitmap capped at maxDimension on its longest side, entirely off the
+     * main thread - avoids decoding several full-resolution screenshots synchronously, which is
+     * what causes the app to freeze/lag when picking multiple images. */
+    private fun decodeSampledBitmap(uri: Uri, maxDimension: Int): android.graphics.Bitmap? {
+        return try {
+            val boundsOptions = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, boundsOptions)
+            }
+            var sampleSize = 1
+            val (w, h) = boundsOptions.outWidth to boundsOptions.outHeight
+            if (w > 0 && h > 0) {
+                while ((w / sampleSize) > maxDimension || (h / sampleSize) > maxDimension) {
+                    sampleSize *= 2
+                }
+            }
+            val decodeOptions = android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, decodeOptions)
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
+    /**
+     * Two-pass extraction so far fewer numbers get missed:
+     *  1) Plain digit runs (10-13 digits) exactly as OCR read them - covers the common case
+     *     of a number printed with no separators.
+     *  2) Digits allowed to have spaces/hyphens/dots/brackets between them (spaced-out or
+     *     STD-code-style numbers), which the old pattern also caught.
+     * Both passes tolerate the OCR noise (bullets, pipes, extra spacing) that was making real
+     * numbers slip through before.
+     */
     private fun extractPhoneNumbers(text: String): Set<String> {
-        val regex = Regex("(\\+?\\d[\\d\\-\\s]{8,14}\\d)")
         val results = linkedSetOf<String>()
-        regex.findAll(text).forEach { match ->
-            val cleaned = match.value.replace(Regex("[\\s-]"), "")
+
+        // Pass 1: clean, unbroken digit runs.
+        Regex("\\d{10,13}").findAll(text).forEach { match ->
+            results.add(match.value)
+        }
+
+        // Pass 2: numbers with spacing/punctuation mixed in (e.g. "+91 90750-34748",
+        // "90750 34748", "(+91) 9075034748").
+        val spacedRegex = Regex("(\\+?\\d[\\d\\-\\s.()]{7,16}\\d)")
+        spacedRegex.findAll(text).forEach { match ->
+            val cleaned = match.value.replace(Regex("[\\s\\-.()]"), "")
             val digitsOnly = cleaned.replace("+", "")
             if (digitsOnly.length in 10..13 && digitsOnly.all { it.isDigit() }) {
                 results.add(cleaned)
             }
         }
+
         return results
     }
 
-    private fun onImagesProcessed(numbers: Set<String>) {
+    private fun onImagesProcessed(numbers: Set<String>, failedCount: Int) {
         runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
             if (numbers.isEmpty()) {
-                Toast.makeText(this, "No numbers found in the image(s)", Toast.LENGTH_SHORT).show()
+                val msg = if (failedCount > 0)
+                    "Couldn't read $failedCount image(s) - try a plain screenshot instead of a cropped/rotated photo"
+                else "No numbers found in the image(s)"
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 return@runOnUiThread
             }
             val existing = binding.etNumbers.text.toString()
             val newText = numbers.joinToString("\n")
             val merged = if (existing.isBlank()) newText else "$existing\n$newText"
             binding.etNumbers.setText(merged)
-            Toast.makeText(this, "${numbers.size} number(s) found (duplicates auto-removed), now tap the ⬇ icon to load", Toast.LENGTH_LONG).show()
+            val summary = StringBuilder("${numbers.size} number(s) found (duplicates auto-removed)")
+            if (failedCount > 0) summary.append(", $failedCount image(s) could not be read")
+            summary.append(", now tap the ⬇ icon to load")
+            Toast.makeText(this, summary.toString(), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -328,10 +406,11 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         val duplicates = mutableListOf<String>()
         val deduped = mutableListOf<Lead>()
         for (lead in parsedLeads) {
-            if (seen.contains(lead.phone)) {
+            val normalized = PhoneUtils.normalize(lead.phone)
+            if (seen.contains(normalized)) {
                 duplicates.add(lead.phone)
             } else {
-                seen.add(lead.phone)
+                seen.add(normalized)
                 deduped.add(lead)
             }
         }
@@ -340,7 +419,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             "${duplicates.size} duplicate number(s) found and removed." else ""
 
         val alreadyCalledPhones = callLogStore.calledPhonesWithinDays(60)
-        val neverCalled = deduped.filter { !alreadyCalledPhones.contains(it.phone) }
+        val neverCalled = deduped.filter { !alreadyCalledPhones.contains(PhoneUtils.normalize(it.phone)) }
         val alreadyCalledCount = deduped.size - neverCalled.size
         if (alreadyCalledCount > 0) {
             val existing = binding.tvDuplicateInfo.text.toString()
@@ -363,6 +442,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 adapter.setLeads(engine.leads)
                 refreshDashboard()
                 setLoadButtonActive(true)
+                binding.etNumbers.setText("") // these numbers are now a committed list, not a draft
                 Toast.makeText(this, "${neverCalled.size} numbers loaded", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
@@ -434,7 +514,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         }
     }
 
-    /** Opens WhatsApp directly on this number's chat with the info message pre-filled (editable, just needs Send). */
+    /** Opens WhatsApp Business directly on this number's chat with the info message pre-filled
+     *  (editable, just needs Send). Falls back to regular WhatsApp only if Business isn't installed. */
     private fun openWhatsAppWithMessage(phone: String) {
         val digits = phone.filter { it.isDigit() }
         val withCountryCode = when {
@@ -445,17 +526,24 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         val message = infoMessageStore.getMessage()
         val encodedMessage = java.net.URLEncoder.encode(message, "UTF-8")
         val uri = Uri.parse("https://wa.me/$withCountryCode?text=$encodedMessage")
-        val intent = Intent(Intent.ACTION_VIEW, uri)
-        intent.setPackage("com.whatsapp")
-        try {
-            startActivity(intent)
-        } catch (e: android.content.ActivityNotFoundException) {
-            // WhatsApp not installed under that package (e.g. WhatsApp Business) - fall back to generic view
+
+        val packagesInPriorityOrder = listOf("com.whatsapp.w4b", "com.whatsapp")
+        for (pkg in packagesInPriorityOrder) {
             try {
-                startActivity(Intent(Intent.ACTION_VIEW, uri))
-            } catch (e2: android.content.ActivityNotFoundException) {
-                Toast.makeText(this, "WhatsApp not found", Toast.LENGTH_SHORT).show()
+                val intent = Intent(Intent.ACTION_VIEW, uri)
+                intent.setPackage(pkg)
+                startActivity(intent)
+                return
+            } catch (e: android.content.ActivityNotFoundException) {
+                // try next package
             }
+        }
+        // Neither WhatsApp Business nor regular WhatsApp found under those package names -
+        // let Android pick whatever handles wa.me links (last resort).
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        } catch (e2: android.content.ActivityNotFoundException) {
+            Toast.makeText(this, "WhatsApp Business not found - install it to use this feature", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -709,6 +797,13 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     override fun onResume() {
         super.onResume()
         subscriptionManager.refreshStatusInBackground()
+        // Catches the case where OCR/file-import finished AFTER this Activity got recreated
+        // (e.g. app was killed in the background while picking images) - the result was saved
+        // straight to the draft store, so pull it in now instead of it looking "missing".
+        val draft = numberDraftStore.getDraft()
+        if (draft != binding.etNumbers.text.toString()) {
+            binding.etNumbers.setText(draft)
+        }
         if (pendingInfoOutcome) {
             pendingInfoOutcome = false
             engine.selectOutcome(Outcome.INFO.id)

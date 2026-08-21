@@ -79,20 +79,35 @@ class CallEngine(
         sessionName = saved.sessionName
         batchTarget = saved.batchTarget
         sequencer = CallSequencer(leads.size)
+
+        // Carry over whatever dial-time log reference was last saved - this is what lets us
+        // correctly ask for that number's outcome below instead of ever silently re-dialing it.
+        pendingLogDate = saved.pendingLogDate
+        pendingLogIndex = if (saved.pendingLogIndex >= 0) saved.pendingLogIndex else null
+
+        var recoveredPendingOutcome: Int? = null
         for (i in leads.indices) {
             if (leads[i].status == CallSequencer.Status.CALLING) {
-                leads[i].status = CallSequencer.Status.PENDING // never guess - avoid auto-dial on uncertainty
+                // A call was actually placed to this number before the app closed/died (this
+                // happens on every call, since dialing switches away to the Phone app - if
+                // Android kills this app in the background during that call, we land here).
+                // We must NEVER silently re-dial it - treat it exactly like a call that just
+                // ended and is waiting for its outcome to be tagged.
+                leads[i].status = CallSequencer.Status.COMPLETED
+                recoveredPendingOutcome = i
             }
             sequencer!!.statuses[i] = leads[i].status
         }
+
         // Restore any outcome that was still waiting to be tagged when the app was
         // stopped/closed last time, so the user gets asked for it again before anything
         // else can be dialed - it must never get silently skipped.
-        if (saved.pendingOutcomeIndex >= 0 && saved.pendingOutcomeIndex in leads.indices) {
-            pendingOutcomeIndex = saved.pendingOutcomeIndex
-            pendingLogDate = saved.pendingLogDate
-            pendingLogIndex = if (saved.pendingLogIndex >= 0) saved.pendingLogIndex else null
+        pendingOutcomeIndex = when {
+            saved.pendingOutcomeIndex >= 0 && saved.pendingOutcomeIndex in leads.indices -> saved.pendingOutcomeIndex
+            recoveredPendingOutcome != null -> recoveredPendingOutcome
+            else -> null
         }
+
         listener.onLog("Session restored: $sessionName (auto-dial NOT triggered)")
         return true
     }
@@ -187,6 +202,33 @@ class CallEngine(
     private fun dial(index: Int) {
         if (index !in leads.indices) return
         val lead = leads[index]
+
+        // Final safety net, right at the moment of dialing: never call the same number twice.
+        // Catches anything that could slip past the load-time dedup - e.g. the same number in
+        // two different formats, or any other edge case - so a double call is never possible.
+        val normalized = PhoneUtils.normalize(lead.phone)
+        val duplicateWithinThisList = leads.withIndex().any { (i, other) ->
+            i != index && PhoneUtils.normalize(other.phone) == normalized &&
+                (other.status == CallSequencer.Status.COMPLETED || other.status == CallSequencer.Status.SKIPPED)
+        }
+        if (duplicateWithinThisList || callLogStore.calledToday(normalized)) {
+            listener.onLog("Skipping ${lead.phone} - already called, preventing a double call")
+            leads[index].status = CallSequencer.Status.SKIPPED
+            listener.onLeadUpdated(index, CallSequencer.Status.SKIPPED)
+            callLogStore.addEntry(
+                callLogStore.todayKey(),
+                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Skipped", null, "Auto-skipped: already called - duplicate")
+            )
+            persist()
+            val next = sequencer?.autoSkipCurrentAndAdvance()
+            if (next != null) {
+                dial(next)
+            } else if (sequencer?.isComplete() == true) {
+                finishSession()
+            }
+            return
+        }
+
         leads[index].status = CallSequencer.Status.CALLING
         listener.onLeadUpdated(index, CallSequencer.Status.CALLING)
         listener.onDialing(index, lead)
@@ -213,6 +255,10 @@ class CallEngine(
             )
             pendingLogDate = date
             pendingLogIndex = logIndex
+            // Saved immediately - not just at Stop/Skip - so if Android kills the app in the
+            // background during this very call (normal, since dialing switches to the Phone
+            // app), the next restore knows a call was actually placed here.
+            persist()
         } catch (e: SecurityException) {
             listener.onEngineError("Call permission missing")
             stop()

@@ -84,18 +84,23 @@ class CallLogStore(context: Context) {
 
     /** All phone numbers ever logged across every day's sheet, for duplicate-call warnings. */
     fun allCalledPhones(): Set<String> {
-        return getDays().flatMap { loadDay(it) }.map { it.phone }.toSet()
+        return getDays().flatMap { loadDay(it) }.map { PhoneUtils.normalize(it.phone) }.toSet()
     }
 
-    /** Phone numbers logged within the last [days] days (default 60 ~ 2 months), for auto-excluding recent calls when loading a new list. */
+    /** Phone numbers logged within the last [days] days (default 60 ~ 2 months), for auto-excluding recent calls when loading a new list. Normalized so the same number in a different format (with/without +91, leading 0, etc) is still caught. */
     fun calledPhonesWithinDays(days: Int): Set<String> {
         val cutoff = Date(Date().time - days.toLong() * 24 * 60 * 60 * 1000)
         val cutoffKey = dayFormat.format(cutoff)
         return getDays()
             .filter { it >= cutoffKey }
             .flatMap { loadDay(it) }
-            .map { it.phone }
+            .map { PhoneUtils.normalize(it.phone) }
             .toSet()
+    }
+
+    /** True if this exact number has already been dialed today (any status - Dialed/Completed/Skipped all count, since a call was already placed to it). This is the last-line-of-defense check right before actually placing a call. */
+    fun calledToday(normalizedPhone: String): Boolean {
+        return loadDay(todayKey()).any { PhoneUtils.normalize(it.phone) == normalizedPhone }
     }
 
     private fun saveDay(date: String, entries: List<CallLogEntry>) {
