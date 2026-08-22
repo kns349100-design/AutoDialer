@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Subscription"
+            android:text="Choose a Plan"
             android:textStyle="bold"
             android:textColor="@color/text_primary_dark"
             android:textSize="20sp"/>
@@ -62,6 +62,19 @@
                 android:textSize="14sp"/>
 
             <TextView
+                android:id="@+id/btnFreeTrial"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_pill_positive"
+                android:gravity="center"
+                android:padding="12dp"
+                android:textColor="@color/positive_text"
+                android:textSize="13sp"
+                android:text="Start Free — 24 Hours"
+                android:visibility="gone"/>
+
+            <TextView
                 android:id="@+id/btnPay12Hour"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -107,54 +120,58 @@
                 android:text=""/>
         </LinearLayout>
 
+        <!-- Referral / coupon code - a single compact line at the very bottom, not a whole section. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="16dp"
-            android:layout_marginTop="12dp">
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="16dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Redeem Coupon Code"
-                android:textColor="@color/text_primary_dark"
-                android:textStyle="bold"
-                android:textSize="14sp"/>
+                android:text="Referral code:"
+                android:textColor="@color/text_muted_dark"
+                android:textSize="12sp"/>
 
             <EditText
                 android:id="@+id/etCode"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:hint="Enter code here"
+                android:hint="Optional"
                 android:textColor="@color/text_primary_dark"
                 android:textColorHint="@color/text_muted_dark"
                 android:background="@drawable/bg_avatar"
-                android:padding="10dp"
-                android:layout_marginTop="8dp"/>
+                android:padding="8dp"
+                android:textSize="12sp"
+                android:layout_marginStart="8dp"/>
 
             <TextView
                 android:id="@+id/btnRedeem"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_pill_resume"
-                android:gravity="center"
-                android:padding="12dp"
-                android:textColor="@color/resume_text"
-                android:textSize="13sp"
-                android:text="Activate"/>
-
-            <TextView
-                android:id="@+id/tvRedeemResult"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textColor="@color/text_secondary_dark"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_pill_resume"
+                android:gravity="center"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textColor="@color/resume_text"
                 android:textSize="12sp"
-                android:text=""/>
+                android:text="Apply"/>
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvRedeemResult"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/text_secondary_dark"
+            android:textSize="12sp"
+            android:text=""/>
 
         <TextView
             android:id="@+id/tvDeviceId"

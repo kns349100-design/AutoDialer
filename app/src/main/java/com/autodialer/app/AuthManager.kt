@@ -94,11 +94,17 @@ class AuthManager(private val context: Context) {
         }.start()
     }
 
-    /** Checks whether this device is still the active session for the logged-in phone number. */
+    /** Checks whether this device is still the active session for the logged-in phone number.
+     * Throttled to at most once every 3 minutes - this hits the (slow, free) backend, so
+     * calling it on every single onResume made the app feel sluggish overall for no benefit. */
     fun checkSessionInBackground(onLoggedOutElsewhere: () -> Unit) {
         if (SubscriptionManager.SCRIPT_URL.startsWith("PASTE_")) return
         val phone = phoneNumber()
         if (phone.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val lastChecked = prefs.getLong("lastSessionCheck", 0L)
+        if (now - lastChecked < 3 * 60 * 1000) return
+        prefs.edit().putLong("lastSessionCheck", now).apply()
         Thread {
             try {
                 val url = "${SubscriptionManager.SCRIPT_URL}?action=checkSession" +
@@ -118,11 +124,15 @@ class AuthManager(private val context: Context) {
     private fun httpGet(urlString: String): String {
         val conn = URL(urlString).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
-        conn.connectTimeout = 10000
-        conn.readTimeout = 10000
+        // Apps Script "cold starts" after being idle can genuinely take several seconds - this
+        // just needs to be long enough not to cut off a real (if slow) response.
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
         conn.instanceFollowRedirects = true
         try {
-            return conn.inputStream.bufferedReader().use { it.readText() }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            return stream?.bufferedReader()?.use { it.readText() } ?: "{\"status\":\"error\",\"message\":\"Empty response (HTTP $code)\"}"
         } finally {
             conn.disconnect()
         }

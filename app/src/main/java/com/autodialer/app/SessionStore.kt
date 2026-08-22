@@ -30,7 +30,9 @@ data class SavedSession(
  */
 class SessionStore(context: Context) {
 
+    private val appContext = context.applicationContext
     private val prefs = context.getSharedPreferences("autodialer_session", Context.MODE_PRIVATE)
+    private val leadsFile = "session_leads.json"
 
     fun save(session: SavedSession) {
         val leadsArray = JSONArray()
@@ -42,9 +44,11 @@ class SessionStore(context: Context) {
             obj.put("outcome", lead.outcome ?: "")
             leadsArray.put(obj)
         }
+        // The leads list can run into the thousands - keep it out of SharedPreferences (which
+        // rewrites its entire file on every save) and in its own plain file instead.
+        FileStore.writeString(appContext, leadsFile, leadsArray.toString())
         prefs.edit()
             .putString("sessionName", session.sessionName)
-            .putString("leads", leadsArray.toString())
             .putInt("currentIndex", session.currentIndex)
             .putInt("delaySeconds", session.delaySeconds)
             .putInt("batchTarget", session.batchTarget)
@@ -57,7 +61,18 @@ class SessionStore(context: Context) {
 
     fun load(): SavedSession? {
         if (!prefs.getBoolean("hasSession", false)) return null
-        val leadsJson = prefs.getString("leads", null) ?: return null
+        var leadsJson = FileStore.readString(appContext, leadsFile)
+        if (leadsJson == null) {
+            // Fall back to the old SharedPreferences-based storage so an in-progress list
+            // isn't silently lost right after this update.
+            val legacy = prefs.getString("leads", null)
+            if (legacy != null) {
+                FileStore.writeString(appContext, leadsFile, legacy)
+                prefs.edit().remove("leads").apply()
+                leadsJson = legacy
+            }
+        }
+        if (leadsJson == null) return null
         val array = JSONArray(leadsJson)
         val leads = mutableListOf<Lead>()
         for (i in 0 until array.length()) {
@@ -86,6 +101,7 @@ class SessionStore(context: Context) {
 
     fun clear() {
         prefs.edit().clear().apply()
+        FileStore.delete(appContext, leadsFile)
     }
 
     fun hasSavedSession(): Boolean = prefs.getBoolean("hasSession", false)

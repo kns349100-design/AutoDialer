@@ -93,6 +93,17 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         numberDraftStore = NumberDraftStore(this)
         subscriptionManager.ensureFirstLaunchRecorded()
         subscriptionManager.refreshStatusInBackground()
+
+        // No free/paid time left (or never picked a plan at all) - send straight to the
+        // plan-selection screen instead of showing the dialer. This is the single gate that
+        // covers every path into this screen: right after login, and any time a running
+        // trial/plan runs out while the app is closed or reopened later.
+        if (!subscriptionManager.hasAccess()) {
+            startActivity(Intent(this, SubscriptionActivity::class.java))
+            finish()
+            return
+        }
+
         engine = CallEngine(this, sessionStore, callLogStore, this)
 
         adapter = NumberAdapter(mutableListOf(), outcomeStore)
@@ -149,6 +160,26 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 }
             }
         }
+
+        maybePromptBatteryOptimization()
+    }
+
+    /** Shown once, the very first time - explains why this matters and offers the setting.
+     * Skipped silently if already allowed, if declined once already, or if a list-in-progress
+     * outcome overlay is showing (don't stack dialogs on top of that). */
+    private fun maybePromptBatteryOptimization() {
+        val prefs = getSharedPreferences("autodialer_battery_prompt", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("asked", false)) return
+        val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (powerManager.isIgnoringBatteryOptimizations(packageName)) return
+        if (binding.overlayOutcome.visibility == android.view.View.VISIBLE) return
+        prefs.edit().putBoolean("asked", true).apply()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Keep your call list safe")
+            .setMessage("Some phones close apps in the background to save battery, which can interrupt a call list in progress. Allow AutoDialer to run without restrictions so this never happens.")
+            .setPositiveButton("Allow") { _, _ -> requestIgnoreBatteryOptimizations() }
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
     private fun requestNeededPermissions() {
@@ -340,6 +371,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         popup.menu.add(0, 4, 3, "Plan / Subscription")
         popup.menu.add(0, 5, 4, "+ Custom Call Option")
         popup.menu.add(0, 6, 5, "Batch Limit (calls per session)")
+        popup.menu.add(0, 7, 6, "Stop phone from closing this app (recommended)")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> startActivity(Intent(this, CallLogActivity::class.java))
@@ -348,10 +380,38 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 4 -> startActivity(Intent(this, SubscriptionActivity::class.java))
                 5 -> showManageOutcomesDialog()
                 6 -> showBatchLimitDialog()
+                7 -> requestIgnoreBatteryOptimizations()
             }
             true
         }
         popup.show()
+    }
+
+    /**
+     * Asks the OS to stop applying battery-saving restrictions to this app. On phones with
+     * aggressive background-app killers (common on Xiaomi/Vivo/Oppo/Realme), this is what
+     * most often causes the app to get force-closed mid-list, making a loaded list look like
+     * it "disappeared" even though it's safely saved - this removes the OS's main reason to
+     * kill it in the first place, on top of the app already saving the list at every step.
+     */
+    private fun requestIgnoreBatteryOptimizations() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            Toast.makeText(this, "Already allowed to run in the background", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            intent.data = Uri.parse("package:$packageName")
+            startActivity(intent)
+        } catch (e: Exception) {
+            // Some OEMs block this screen - send them to the general battery settings instead.
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (e2: Exception) {
+                Toast.makeText(this, "Couldn't open battery settings on this phone", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun showBatchLimitDialog() {
@@ -822,5 +882,13 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     override fun onDestroy() {
         super.onDestroy()
         engine.teardown()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Final safety net: force a save the instant the app leaves the foreground (which
+        // happens on every single call, since dialing switches to the Phone app) - so even in
+        // the worst case, timing-wise, nothing is ever left un-saved.
+        if (::engine.isInitialized) engine.persist()
     }
 }

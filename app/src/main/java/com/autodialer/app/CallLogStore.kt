@@ -23,9 +23,12 @@ data class CallLogEntry(
  */
 class CallLogStore(context: Context) {
 
+    private val appContext = context.applicationContext
     private val prefs = context.getSharedPreferences("autodialer_call_log", Context.MODE_PRIVATE)
     private val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+
+    private fun dayFileName(date: String) = "calllog_$date.json"
 
     fun todayKey(): String = dayFormat.format(Date())
     fun nowTime(): String = timeFormat.format(Date())
@@ -57,7 +60,20 @@ class CallLogStore(context: Context) {
     }
 
     fun loadDay(date: String): List<CallLogEntry> {
-        val json = prefs.getString("day_$date", null) ?: return emptyList()
+        // A day with a large list of calls can hold thousands of rows - kept in its own file
+        // rather than SharedPreferences (which rewrites its entire file on every change).
+        var json = FileStore.readString(appContext, dayFileName(date))
+        if (json == null) {
+            // Fall back to the old SharedPreferences-based storage (from before this day's
+            // data was moved to a file) so nothing already logged gets silently lost.
+            val legacy = prefs.getString("day_$date", null)
+            if (legacy != null) {
+                FileStore.writeString(appContext, dayFileName(date), legacy)
+                prefs.edit().remove("day_$date").apply()
+                json = legacy
+            }
+        }
+        if (json == null) return emptyList()
         return try {
             val array = JSONArray(json)
             val list = mutableListOf<CallLogEntry>()
@@ -116,7 +132,7 @@ class CallLogStore(context: Context) {
             obj.put("collected", e.collected)
             array.put(obj)
         }
-        prefs.edit().putString("day_$date", array.toString()).apply()
+        FileStore.writeString(appContext, dayFileName(date), array.toString())
     }
 
     /** Toggles the manual "Collected" mark on one row (e.g. after checking WhatsApp yourself). */
@@ -139,7 +155,7 @@ class CallLogStore(context: Context) {
 
     /** Deletes an entire day's sheet. */
     fun deleteDay(date: String) {
-        prefs.edit().remove("day_$date").apply()
+        FileStore.delete(appContext, dayFileName(date))
         val days = getDays().toMutableSet()
         days.remove(date)
         prefs.edit().putStringSet("days", days).apply()

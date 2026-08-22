@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Lets the app ask the user to stop the OS from aggressively killing it in the
+         background - this is what most often causes an in-progress list to look "lost"
+         on phones with strict battery managers (Xiaomi/Vivo/Oppo/Realme etc). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Needed on Android 11+ to be able to detect/launch WhatsApp Business specifically -->
     <queries>
@@ -18,6 +22,7 @@
         android:icon="@android:drawable/sym_action_call"
         android:label="AutoDialer"
         android:theme="@style/Theme.AutoDialer"
+        android:largeHeap="true"
         android:usesCleartextTraffic="false">
 
         <activity

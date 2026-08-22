@@ -29,7 +29,7 @@ class SubscriptionManager(private val context: Context) {
         const val SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyHEnFWqibZeO774YRKcdlyWb_EgOWyFAi8gmiFDkbajNZQo5TiIL18yOdLp3g1KY9v/exec"
 
         // TODO: replace with your real Razorpay Key ID (safe to embed - it's the PUBLIC key)
-        const val RAZORPAY_KEY_ID = "PASTE_YOUR_RAZORPAY_KEY_ID_HERE"
+        const val RAZORPAY_KEY_ID = "rzp_test_TSeyZM4DleOMiP"
 
         const val TRIAL_DURATION_MS = 24L * 60 * 60 * 1000 // 1 day
 
@@ -54,15 +54,30 @@ class SubscriptionManager(private val context: Context) {
         }
     }
 
-    private fun firstLaunchTime(): Long = prefs.getLong("firstLaunch", System.currentTimeMillis())
+    /** True once the user has explicitly tapped "Start Free — 24 Hours" (whether or not it has
+     * expired since). Used to hide that option from the plan list after it's been used once -
+     * it's a one-time offer, not something that keeps reappearing. */
+    fun hasStartedFreeTrial(): Boolean = prefs.contains("trialStartedAt")
+
+    /** Starts the 24-hour free trial right now. No-ops if already started before (never
+     * extends/restarts it). */
+    fun startFreeTrial() {
+        if (!prefs.contains("trialStartedAt")) {
+            prefs.edit().putLong("trialStartedAt", System.currentTimeMillis()).apply()
+        }
+    }
+
+    private fun trialStartedAt(): Long = prefs.getLong("trialStartedAt", 0L)
 
     fun isTrialActive(): Boolean {
-        val elapsed = System.currentTimeMillis() - firstLaunchTime()
+        val startedAt = trialStartedAt()
+        if (startedAt == 0L) return false
+        val elapsed = System.currentTimeMillis() - startedAt
         return elapsed in 0 until TRIAL_DURATION_MS
     }
 
     fun trialMillisRemaining(): Long =
-        (TRIAL_DURATION_MS - (System.currentTimeMillis() - firstLaunchTime())).coerceAtLeast(0)
+        (TRIAL_DURATION_MS - (System.currentTimeMillis() - trialStartedAt())).coerceAtLeast(0)
 
     private fun cachedExpiry(): Long = prefs.getLong("cachedExpiry", 0L)
     private fun cachedPlanType(): String = prefs.getString("cachedPlanType", "") ?: ""
@@ -77,9 +92,13 @@ class SubscriptionManager(private val context: Context) {
         else -> "No active plan"
     }
 
-    /** Call this on app start / resume when internet may be available. Silently no-ops if offline or URL not configured. */
+    /** Call this on app start / resume when internet may be available. Silently no-ops if offline, URL not configured, or checked very recently (throttled to reduce background network load / perceived slowness). */
     fun refreshStatusInBackground() {
         if (SCRIPT_URL.startsWith("PASTE_")) return
+        val now = System.currentTimeMillis()
+        val lastChecked = prefs.getLong("lastStatusCheck", 0L)
+        if (now - lastChecked < 3 * 60 * 1000) return
+        prefs.edit().putLong("lastStatusCheck", now).apply()
         Thread {
             try {
                 val url = "$SCRIPT_URL?action=check&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
@@ -173,11 +192,15 @@ class SubscriptionManager(private val context: Context) {
     private fun httpGet(urlString: String): String {
         val conn = URL(urlString).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
-        conn.connectTimeout = 10000
-        conn.readTimeout = 10000
+        // Apps Script "cold starts" after being idle can genuinely take several seconds - this
+        // just needs to be long enough not to cut off a real (if slow) response.
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
         conn.instanceFollowRedirects = true
         try {
-            return conn.inputStream.bufferedReader().use { it.readText() }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            return stream?.bufferedReader()?.use { it.readText() } ?: "{\"status\":\"error\",\"message\":\"Empty response (HTTP $code)\"}"
         } finally {
             conn.disconnect()
         }
