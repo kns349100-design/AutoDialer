@@ -864,7 +864,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         if (draft != binding.etNumbers.text.toString()) {
             binding.etNumbers.setText(draft)
         }
-        if (pendingInfoOutcome) {
+        if (pendingInfoOutcome && ::engine.isInitialized) {
             pendingInfoOutcome = false
             engine.selectOutcome(Outcome.INFO.id)
         }
@@ -872,7 +872,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             runOnUiThread {
                 Toast.makeText(this, "Logged out - this account was used on another device", Toast.LENGTH_LONG).show()
                 authManager.logout()
-                engine.stop()
+                if (::engine.isInitialized) engine.stop()
                 startActivity(Intent(this, LoginActivity::class.java))
                 finish()
             }
@@ -881,7 +881,11 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
     override fun onDestroy() {
         super.onDestroy()
-        engine.teardown()
+        // Guarded: if this Activity is being torn down before `engine` was ever set up (e.g.
+        // it redirected straight to SubscriptionActivity because there's no active plan yet -
+        // right after login, before engine = CallEngine(...) runs), engine.teardown() would
+        // throw and crash the app every single time. This is exactly that safety check.
+        if (::engine.isInitialized) engine.teardown()
     }
 
     override fun onPause() {
