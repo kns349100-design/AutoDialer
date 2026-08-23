@@ -29,7 +29,8 @@ function doGet(e) {
   var action = e.parameter.action;
   if (action === 'redeem') return handleRedeem(e);
   if (action === 'check') return handleCheck(e);
-  if (action === 'verifyPayment') return handleVerifyPayment(e);
+  if (action === 'createPaymentLink') return handleCreatePaymentLink(e);
+  if (action === 'checkPayment') return handleCheckPayment(e);
   if (action === 'login') return handleLogin(e);
   if (action === 'resetPin') return handleResetPin(e);
   if (action === 'checkSession') return handleCheckSession(e);
@@ -41,16 +42,95 @@ function getSheet(name) {
 }
 
 /**
- * Verifies a Razorpay payment directly with Razorpay's servers (server-side,
- * so the secret key never touches the Android app) and grants access if the
- * payment is real, captured, and the amount matches the plan.
+ * Cashfree base API URL - sandbox for TEST keys, live for PROD keys. Controlled by the
+ * CASHFREE_ENV script property ('TEST' or 'PROD', defaults to TEST so nothing breaks if
+ * it's not set yet).
  */
-function handleVerifyPayment(e) {
-  var paymentId = String(e.parameter.paymentId || '').trim();
+function cashfreeBaseUrl() {
+  var env = PropertiesService.getScriptProperties().getProperty('CASHFREE_ENV');
+  return (env === 'PROD') ? 'https://api.cashfree.com' : 'https://sandbox.cashfree.com';
+}
+
+function cashfreeHeaders() {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    'x-client-id': props.getProperty('CASHFREE_APP_ID'),
+    'x-client-secret': props.getProperty('CASHFREE_SECRET_KEY'),
+    'x-api-version': '2023-08-01',
+    'Content-Type': 'application/json'
+  };
+}
+
+/**
+ * Creates a Cashfree Payment Link for the chosen plan (server-side, so the secret key never
+ * touches the Android app) and returns the link URL for the app to open in the browser.
+ */
+function handleCreatePaymentLink(e) {
+  var deviceId = String(e.parameter.deviceId || '').trim();
+  var planType = String(e.parameter.planType || '').trim().toUpperCase();
+  var phone = String(e.parameter.phone || '').trim();
+
+  if (!deviceId || !planType) {
+    return jsonResponse({ status: 'error', message: 'missing params' });
+  }
+
+  var amountRupees = { 'HOURLY12': 10, 'MONTHLY': 300, 'YEARLY': 1000 }[planType];
+  if (!amountRupees) {
+    return jsonResponse({ status: 'error', message: 'Invalid plan type' });
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('CASHFREE_APP_ID') || !props.getProperty('CASHFREE_SECRET_KEY')) {
+    return jsonResponse({ status: 'error', message: 'Cashfree keys backend me set nahi hain' });
+  }
+
+  if (!/^[0-9]{10}$/.test(phone)) phone = '9999999999'; // Cashfree requires a 10-digit phone
+
+  var linkId = 'AD' + planType + deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(-8) + Date.now();
+
+  var payload = {
+    link_id: linkId,
+    link_amount: amountRupees,
+    link_currency: 'INR',
+    link_purpose: 'AutoDialer ' + planType,
+    customer_details: {
+      customer_phone: phone,
+      customer_name: 'AutoDialer User'
+    },
+    link_notify: { send_sms: false, send_email: false },
+    link_auto_reminders: false
+  };
+
+  var response;
+  try {
+    response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/links', {
+      method: 'post',
+      headers: cashfreeHeaders(),
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    return jsonResponse({ status: 'error', message: 'Cashfree se contact nahi ho paya' });
+  }
+
+  var result = JSON.parse(response.getContentText());
+  if (!result.link_url) {
+    return jsonResponse({ status: 'error', message: 'Payment link nahi ban paya: ' + (result.message || JSON.stringify(result)) });
+  }
+
+  return jsonResponse({ status: 'ok', linkUrl: result.link_url, linkId: linkId, planType: planType });
+}
+
+/**
+ * Checks a Cashfree Payment Link's status directly with Cashfree's servers and grants
+ * access if it's really been paid and the amount matches the plan.
+ */
+function handleCheckPayment(e) {
+  var linkId = String(e.parameter.linkId || '').trim();
   var deviceId = String(e.parameter.deviceId || '').trim();
   var planType = String(e.parameter.planType || '').trim().toUpperCase();
 
-  if (!paymentId || !deviceId || !planType) {
+  if (!linkId || !deviceId || !planType) {
     return jsonResponse({ status: 'error', message: 'missing params' });
   }
 
@@ -58,49 +138,38 @@ function handleVerifyPayment(e) {
   var actSheet = getSheet('Activations');
   var existing = actSheet.getDataRange().getValues();
   for (var i = 1; i < existing.length; i++) {
-    if (String(existing[i][1]) === paymentId) {
+    if (String(existing[i][1]) === linkId) {
       return jsonResponse({ status: 'ok', expiryAt: Number(existing[i][3]), planType: existing[i][4] });
     }
   }
 
-  var props = PropertiesService.getScriptProperties();
-  var keyId = props.getProperty('RAZORPAY_KEY_ID');
-  var keySecret = props.getProperty('RAZORPAY_KEY_SECRET');
-  if (!keyId || !keySecret) {
-    return jsonResponse({ status: 'error', message: 'Razorpay keys backend me set nahi hain' });
-  }
-
-  var expectedAmountPaise = { 'HOURLY12': 1000, 'MONTHLY': 30000, 'YEARLY': 100000 }[planType];
-  if (!expectedAmountPaise) {
+  var expectedAmountRupees = { 'HOURLY12': 10, 'MONTHLY': 300, 'YEARLY': 1000 }[planType];
+  if (!expectedAmountRupees) {
     return jsonResponse({ status: 'error', message: 'Invalid plan type' });
   }
 
-  var authHeader = 'Basic ' + Utilities.base64Encode(keyId + ':' + keySecret);
   var response;
   try {
-    response = UrlFetchApp.fetch('https://api.razorpay.com/v1/payments/' + paymentId, {
-      headers: { Authorization: authHeader },
+    response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/links/' + linkId, {
+      headers: cashfreeHeaders(),
       muteHttpExceptions: true
     });
   } catch (err) {
-    return jsonResponse({ status: 'error', message: 'Razorpay se contact nahi ho paya' });
+    return jsonResponse({ status: 'error', message: 'Cashfree se contact nahi ho paya' });
   }
 
-  var payment = JSON.parse(response.getContentText());
-  if (payment.error) {
-    return jsonResponse({ status: 'error', message: 'Payment verify nahi hua: ' + payment.error.description });
+  var link = JSON.parse(response.getContentText());
+  if (link.link_status !== 'PAID') {
+    return jsonResponse({ status: 'error', message: 'Payment abhi complete nahi hua (status: ' + (link.link_status || 'unknown') + ')' });
   }
-  if (payment.status !== 'captured') {
-    return jsonResponse({ status: 'error', message: 'Payment abhi captured nahi hua (status: ' + payment.status + ')' });
-  }
-  if (Number(payment.amount) !== expectedAmountPaise) {
+  if (Number(link.link_amount_paid) < expectedAmountRupees) {
     return jsonResponse({ status: 'error', message: 'Payment amount plan se match nahi karta' });
   }
 
   var now = Date.now();
   var expiryAt = grantExpiry(planType, now);
 
-  actSheet.appendRow([deviceId, paymentId, now, expiryAt, planType, false]);
+  actSheet.appendRow([deviceId, linkId, now, expiryAt, planType, false]);
 
   return jsonResponse({ status: 'ok', expiryAt: expiryAt, planType: planType });
 }

@@ -28,9 +28,6 @@ class SubscriptionManager(private val context: Context) {
         // TODO: replace with your deployed Apps Script Web App URL
         const val SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyHEnFWqibZeO774YRKcdlyWb_EgOWyFAi8gmiFDkbajNZQo5TiIL18yOdLp3g1KY9v/exec"
 
-        // TODO: replace with your real Razorpay Key ID (safe to embed - it's the PUBLIC key)
-        const val RAZORPAY_KEY_ID = "rzp_test_TSeyZM4DleOMiP"
-
         const val TRIAL_DURATION_MS = 24L * 60 * 60 * 1000 // 1 day
 
         const val PRICE_HOURLY12_PAISE = 1000   // Rs 10
@@ -155,18 +152,50 @@ class SubscriptionManager(private val context: Context) {
     }
 
     /**
-     * Verifies a completed Razorpay payment with the backend (which checks the payment
-     * directly with Razorpay's servers) and activates the plan automatically - no code needed.
+     * Asks the backend to create a Cashfree Payment Link for the chosen plan (backend holds
+     * the Cashfree App ID + Secret Key, never the app). Returns a link URL to open in the
+     * browser/UPI app, plus the linkId needed later to check payment status.
      */
-    fun verifyPayment(paymentId: String, planType: String, onResult: (success: Boolean, message: String) -> Unit) {
+    fun createPaymentLink(planType: String, phone: String, onResult: (success: Boolean, linkUrl: String?, linkId: String?, message: String) -> Unit) {
+        if (SCRIPT_URL.startsWith("PASTE_")) {
+            onResult(false, null, null, "Backend URL is not set - follow backend/SETUP.md")
+            return
+        }
+        Thread {
+            try {
+                val url = "$SCRIPT_URL?action=createPaymentLink" +
+                    "&planType=${URLEncoder.encode(planType, "UTF-8")}" +
+                    "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}" +
+                    "&phone=${URLEncoder.encode(phone, "UTF-8")}"
+                val response = httpGet(url)
+                val json = JSONObject(response)
+                if (json.optString("status") == "ok") {
+                    val linkUrl = json.optString("linkUrl")
+                    val linkId = json.optString("linkId")
+                    mainHandler.post { onResult(true, linkUrl, linkId, "") }
+                } else {
+                    val message = json.optString("message", "Could not start payment")
+                    mainHandler.post { onResult(false, null, null, message) }
+                }
+            } catch (e: Exception) {
+                mainHandler.post { onResult(false, null, null, "Check your internet and try again") }
+            }
+        }.start()
+    }
+
+    /**
+     * Checks a Cashfree payment link's status with the backend (which checks directly with
+     * Cashfree's servers) and activates the plan automatically once paid - no code needed.
+     */
+    fun checkPayment(linkId: String, planType: String, onResult: (success: Boolean, message: String) -> Unit) {
         if (SCRIPT_URL.startsWith("PASTE_")) {
             onResult(false, "Backend URL is not set - follow backend/SETUP.md")
             return
         }
         Thread {
             try {
-                val url = "$SCRIPT_URL?action=verifyPayment" +
-                    "&paymentId=${URLEncoder.encode(paymentId, "UTF-8")}" +
+                val url = "$SCRIPT_URL?action=checkPayment" +
+                    "&linkId=${URLEncoder.encode(linkId, "UTF-8")}" +
                     "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}" +
                     "&planType=${URLEncoder.encode(planType, "UTF-8")}"
                 val response = httpGet(url)
@@ -180,11 +209,11 @@ class SubscriptionManager(private val context: Context) {
                         .apply()
                     mainHandler.post { onResult(true, "Payment confirmed! Plan is active.") }
                 } else {
-                    val message = json.optString("message", "Payment could not be verified")
+                    val message = json.optString("message", "Payment not completed yet")
                     mainHandler.post { onResult(false, message) }
                 }
             } catch (e: Exception) {
-                mainHandler.post { onResult(false, "Payment went through but verification had an issue - reopen the Plan screen, it will check automatically") }
+                mainHandler.post { onResult(false, "Could not check payment - try again") }
             }
         }.start()
     }

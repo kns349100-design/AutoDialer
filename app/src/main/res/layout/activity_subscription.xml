@@ -118,6 +118,19 @@
                 android:textColor="@color/text_secondary_dark"
                 android:textSize="12sp"
                 android:text=""/>
+
+            <TextView
+                android:id="@+id/btnCheckPayment"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_pill_positive"
+                android:gravity="center"
+                android:padding="12dp"
+                android:textColor="@color/positive_text"
+                android:textSize="13sp"
+                android:text="I've Paid — Check Status"
+                android:visibility="gone"/>
         </LinearLayout>
 
         <!-- Referral / coupon code - a single compact line at the very bottom, not a whole section. -->

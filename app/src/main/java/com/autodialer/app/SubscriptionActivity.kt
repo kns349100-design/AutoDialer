@@ -1,20 +1,20 @@
 package com.autodialer.app
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.autodialer.app.databinding.ActivitySubscriptionBinding
-import com.razorpay.Checkout
-import com.razorpay.PaymentResultListener
-import org.json.JSONObject
 
-class SubscriptionActivity : AppCompatActivity(), PaymentResultListener {
+class SubscriptionActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySubscriptionBinding
     private lateinit var subscriptionManager: SubscriptionManager
     private var pendingPlanType: String? = null
+    private var pendingPlanReference: String? = null
     private val slowHintHandler = Handler(Looper.getMainLooper())
     private var slowHintRunnable: Runnable? = null
 
@@ -22,8 +22,6 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultListener {
         super.onCreate(savedInstanceState)
         binding = ActivitySubscriptionBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        Checkout.preload(applicationContext)
 
         subscriptionManager = SubscriptionManager(this)
         subscriptionManager.ensureFirstLaunchRecorded()
@@ -35,13 +33,16 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultListener {
             goToMainAfterDelay()
         }
         binding.btnPay12Hour.setOnClickListener {
-            startPayment("HOURLY12", SubscriptionManager.PRICE_HOURLY12_PAISE, "12 Hour Access")
+            startCashfreePayment("HOURLY12")
         }
         binding.btnPayMonthly.setOnClickListener {
-            startPayment("MONTHLY", SubscriptionManager.PRICE_MONTHLY_PAISE, "1 Month Access")
+            startCashfreePayment("MONTHLY")
         }
         binding.btnPayYearly.setOnClickListener {
-            startPayment("YEARLY", SubscriptionManager.PRICE_YEARLY_PAISE, "1 Year Access")
+            startCashfreePayment("YEARLY")
+        }
+        binding.btnCheckPayment.setOnClickListener {
+            checkPendingPayment()
         }
 
         binding.btnRedeem.setOnClickListener {
@@ -65,6 +66,59 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultListener {
         }
 
         refreshUi()
+    }
+
+    /**
+     * Asks the backend to create a Cashfree Payment Link for this plan, then opens it in the
+     * browser - user can pay via UPI/card/netbanking on Cashfree's own checkout page. There's
+     * no automatic in-app callback from a browser payment, so after paying the user comes back
+     * and taps "I've Paid" to trigger an automatic server-side check (see checkPendingPayment).
+     */
+    private fun startCashfreePayment(planType: String) {
+        pendingPlanType = planType
+        val phone = AuthManager(this).phoneNumber().filter { it.isDigit() }.takeLast(10)
+
+        binding.tvPaymentResult.text = "Starting payment..."
+        binding.btnCheckPayment.visibility = android.view.View.GONE
+
+        subscriptionManager.createPaymentLink(planType, phone) { success, linkUrl, linkId, message ->
+            if (success && linkUrl != null && linkId != null) {
+                pendingPlanReference = linkId
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl)))
+                    binding.tvPaymentResult.text =
+                        "Complete the payment in the browser, then come back and tap \"I've Paid\" below."
+                    binding.btnCheckPayment.visibility = android.view.View.VISIBLE
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Could not open payment page", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                binding.tvPaymentResult.text = message
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /** Called when the user taps "I've Paid" - asks the backend to check the payment link's
+     * status directly with Cashfree and activate the plan automatically if it's paid. */
+    private fun checkPendingPayment() {
+        val linkId = pendingPlanReference
+        val planType = pendingPlanType
+        if (linkId == null || planType == null) return
+
+        binding.btnCheckPayment.isEnabled = false
+        binding.tvPaymentResult.text = "Checking payment..."
+        startSlowHint(binding.tvPaymentResult, "Still checking - hang on a few more seconds...")
+        subscriptionManager.checkPayment(linkId, planType) { success, message ->
+            cancelSlowHint()
+            binding.btnCheckPayment.isEnabled = true
+            binding.tvPaymentResult.text = message
+            if (success) {
+                binding.btnCheckPayment.visibility = android.view.View.GONE
+                refreshUi()
+                goToMainAfterDelay()
+            }
+        }
     }
 
     /** After successfully activating any plan (free trial started, payment verified, or a
@@ -91,62 +145,6 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultListener {
     private fun cancelSlowHint() {
         slowHintRunnable?.let { slowHintHandler.removeCallbacks(it) }
         slowHintRunnable = null
-    }
-
-    private fun setPayButtonsEnabled(enabled: Boolean) {
-        binding.btnPay12Hour.isEnabled = enabled
-        binding.btnPayMonthly.isEnabled = enabled
-        binding.btnPayYearly.isEnabled = enabled
-    }
-
-    private fun startPayment(planType: String, amountPaise: Int, description: String) {
-        if (SubscriptionManager.RAZORPAY_KEY_ID.startsWith("PASTE_")) {
-            Toast.makeText(this, "Razorpay key is not set - follow RAZORPAY_SETUP.md", Toast.LENGTH_LONG).show()
-            return
-        }
-        pendingPlanType = planType
-        setPayButtonsEnabled(false)
-        val checkout = Checkout()
-        checkout.setKeyID(SubscriptionManager.RAZORPAY_KEY_ID)
-        try {
-            val options = JSONObject()
-            options.put("name", "AutoDialer")
-            options.put("description", description)
-            options.put("currency", "INR")
-            options.put("amount", amountPaise)
-            val prefill = JSONObject()
-            val phone = AuthManager(this).phoneNumber()
-            if (phone.isNotEmpty()) prefill.put("contact", phone)
-            options.put("prefill", prefill)
-            checkout.open(this, options)
-        } catch (e: Exception) {
-            setPayButtonsEnabled(true)
-            Toast.makeText(this, "Could not start payment: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    override fun onPaymentSuccess(razorpayPaymentId: String?) {
-        val planType = pendingPlanType
-        if (planType == null || razorpayPaymentId == null) {
-            setPayButtonsEnabled(true)
-            return
-        }
-        binding.tvPaymentResult.text = "Verifying payment..."
-        startSlowHint(binding.tvPaymentResult, "Still verifying - the server can take a few extra seconds, hang on...")
-        subscriptionManager.verifyPayment(razorpayPaymentId, planType) { success, message ->
-            cancelSlowHint()
-            setPayButtonsEnabled(true)
-            binding.tvPaymentResult.text = message
-            if (success) {
-                refreshUi()
-                goToMainAfterDelay()
-            }
-        }
-    }
-
-    override fun onPaymentError(code: Int, description: String?) {
-        setPayButtonsEnabled(true)
-        binding.tvPaymentResult.text = "Payment cancelled or failed: $description"
     }
 
     override fun onResume() {

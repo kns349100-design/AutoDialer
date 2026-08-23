@@ -44,7 +44,7 @@
 
 ## Is version me kya naya hai (v8 — Direct Payment + Image OCR)
 
-- **Direct in-app payment (Razorpay)**: "Plan" screen me ab "Pay Rs 10/300/1000" buttons hain — user seedha UPI/card se pay karta hai, koi code manually batane ki zarurat nahi, payment hote hi automatic unlock. Setup: `RAZORPAY_SETUP.md` follow karo
+- **Direct in-app payment (Cashfree)**: "Plan" screen me "Pay Rs 10/300/1000" buttons hain — dabate hi Cashfree ka payment link khulta hai (UPI/card/netbanking sab chalega), pay karke wapas aake "I've Paid" dabao, payment automatic verify hoke unlock ho jata hai, koi code manually batane ki zarurat nahi. Setup: `CASHFREE_SETUP.md` follow karo
 - **Image se numbers import (OCR)**: "Image Upload" button — ek ya kai images select karo (screenshot/photo jisme numbers likhe hain), app khud numbers padh ke nikal leta hai (on-device, free, Google ML Kit), exactly wahi numbers jo image me hain, aur duplicate khud hat jate hain
 - Purana coupon-code system bhi maujood hai (backup ke taur pe, agar kabhi manually kisi ko free/discounted access dena ho)
 
