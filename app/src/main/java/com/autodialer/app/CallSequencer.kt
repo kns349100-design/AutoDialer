@@ -118,6 +118,24 @@ class CallSequencer(val total: Int) {
         return tryBeginCall()
     }
 
+    /**
+     * Emergency self-heal: forces the sequencer to treat [index] as the number now being
+     * called, regardless of whatever internal state it was in before. This is only used when
+     * the engine detects that its own bookkeeping disagrees with the real lead list (the
+     * actual source of truth) - it guarantees a list can never be abandoned or marked
+     * "complete" while a number in it is still genuinely pending, no matter what caused the
+     * disagreement in the first place.
+     */
+    fun forceCallingAt(index: Int): Int? {
+        if (index !in statuses.indices) return null
+        stopped = false
+        paused = false
+        currentIndex = index
+        callActive = true
+        statuses[index] = Status.CALLING
+        return index
+    }
+
     fun nextPending(from: Int): Int {
         for (i in (from + 1) until total) {
             if (statuses[i] == Status.PENDING) return i

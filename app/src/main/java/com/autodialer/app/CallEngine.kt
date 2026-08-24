@@ -44,6 +44,22 @@ class CallEngine(
     private var pendingLogDate: String? = null
     private var pendingLogIndex: Int? = null
 
+    /** True right after the app sent the user to WhatsApp for the INFO outcome and is waiting
+     * for them to return before dialing the next number. See markAwaitingWhatsAppReturn(). */
+    private var awaitingWhatsAppReturn = false
+
+    fun isAwaitingWhatsAppReturn(): Boolean = awaitingWhatsAppReturn
+
+    /** Called the instant WhatsApp is opened for the INFO outcome, before the outcome itself
+     * is actually recorded. Persisted immediately so that even if Android kills the app while
+     * WhatsApp is on screen, the app knows on its own - without the user having to redo
+     * anything on WhatsApp - to finish tagging this outcome and dial the next number the
+     * moment it's back in the foreground. */
+    fun markAwaitingWhatsAppReturn() {
+        awaitingWhatsAppReturn = true
+        persist()
+    }
+
     private val telephonyManager =
         activity.getSystemService(Activity.TELEPHONY_SERVICE) as TelephonyManager
     private val handler = Handler(Looper.getMainLooper())
@@ -84,6 +100,7 @@ class CallEngine(
         // correctly ask for that number's outcome below instead of ever silently re-dialing it.
         pendingLogDate = saved.pendingLogDate
         pendingLogIndex = if (saved.pendingLogIndex >= 0) saved.pendingLogIndex else null
+        awaitingWhatsAppReturn = saved.awaitingWhatsAppReturn
 
         var recoveredPendingOutcome: Int? = null
         for (i in leads.indices) {
@@ -126,6 +143,42 @@ class CallEngine(
         }
     }
 
+    /** Source-of-truth check used right before a list is ever cleared: true ONLY when every
+     * single lead genuinely has a final status. This is checked directly against `leads`
+     * (never just the sequencer's own internal flags), so a list can never be wiped or marked
+     * "complete" while a number in it is still waiting to be called - even if some other bug
+     * in the sequencer's bookkeeping exists. */
+    private fun allLeadsFinal(): Boolean =
+        leads.isNotEmpty() && leads.all {
+            it.status == CallSequencer.Status.COMPLETED || it.status == CallSequencer.Status.SKIPPED
+        }
+
+    private fun firstPendingIndex(): Int? =
+        leads.indices.firstOrNull { leads[it].status == CallSequencer.Status.PENDING }
+
+    /** Whenever the sequencer believes there's nothing left to dial, this double-checks
+     * against the real lead list before actually finishing. If they disagree - a pending
+     * number is still sitting there - the list is NEVER discarded; instead the sequencer is
+     * self-healed to resume exactly at that number and dialing continues normally. */
+    private fun finishOrResync() {
+        if (allLeadsFinal()) {
+            finishSession()
+            return
+        }
+        val pendingIndex = firstPendingIndex()
+        if (pendingIndex == null) {
+            finishSession()
+            return
+        }
+        listener.onLog("Safety check: sequencer said the list was done but a pending number remained - resuming it instead of losing the list")
+        val resumed = sequencer?.forceCallingAt(pendingIndex)
+        if (resumed != null) {
+            dial(resumed)
+        } else {
+            finishSession()
+        }
+    }
+
     /** Used for both the very first start AND continuing after a batch limit / manual pause. */
     fun start() {
         val seq = sequencer
@@ -147,7 +200,7 @@ class CallEngine(
         if (index != null) {
             dial(index)
         } else if (seq.isComplete()) {
-            finishSession()
+            finishOrResync()
         }
     }
 
@@ -224,7 +277,7 @@ class CallEngine(
             if (next != null) {
                 dial(next)
             } else if (sequencer?.isComplete() == true) {
-                finishSession()
+                finishOrResync()
             }
             return
         }
@@ -318,6 +371,7 @@ class CallEngine(
         pendingOutcomeIndex = null
         pendingLogDate = null
         pendingLogIndex = null
+        awaitingWhatsAppReturn = false
         persist()
 
         if (batchTarget > 0 && callsDialedThisBatch >= batchTarget) {
@@ -331,7 +385,7 @@ class CallEngine(
         if (next != null) {
             dial(next)
         } else {
-            finishSession()
+            finishOrResync()
         }
     }
 
@@ -355,6 +409,7 @@ class CallEngine(
         pendingOutcomeIndex = null
         pendingLogDate = null
         pendingLogIndex = null
+        awaitingWhatsAppReturn = false
         sessionStore.clear()
     }
 
@@ -368,6 +423,7 @@ class CallEngine(
         pendingOutcomeIndex = null
         pendingLogDate = null
         pendingLogIndex = null
+        awaitingWhatsAppReturn = false
         sessionStore.clear()
         listener.onSessionComplete()
     }
@@ -383,7 +439,8 @@ class CallEngine(
                 batchTarget = batchTarget,
                 pendingOutcomeIndex = pendingOutcomeIndex ?: -1,
                 pendingLogDate = pendingLogDate,
-                pendingLogIndex = pendingLogIndex ?: -1
+                pendingLogIndex = pendingLogIndex ?: -1,
+                awaitingWhatsAppReturn = awaitingWhatsAppReturn
             )
         )
     }

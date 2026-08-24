@@ -20,7 +20,13 @@ data class SavedSession(
     /** -1 means "no call is awaiting an outcome tag". */
     val pendingOutcomeIndex: Int = -1,
     val pendingLogDate: String? = null,
-    val pendingLogIndex: Int = -1
+    val pendingLogIndex: Int = -1,
+    /** True right after the app sent the user to WhatsApp for the INFO outcome and is
+     * waiting for them to come back before dialing the next number. Persisted so that if
+     * Android kills the app in the background while WhatsApp is open (very common - WhatsApp
+     * is heavy), the app still knows to resume this exact step on its own instead of the
+     * flag silently resetting and leaving the flow stuck. */
+    val awaitingWhatsAppReturn: Boolean = false
 )
 
 /**
@@ -55,6 +61,7 @@ class SessionStore(context: Context) {
             .putInt("pendingOutcomeIndex", session.pendingOutcomeIndex)
             .putString("pendingLogDate", session.pendingLogDate ?: "")
             .putInt("pendingLogIndex", session.pendingLogIndex)
+            .putBoolean("awaitingWhatsAppReturn", session.awaitingWhatsAppReturn)
             .putBoolean("hasSession", true)
             .apply()
     }
@@ -95,7 +102,8 @@ class SessionStore(context: Context) {
             batchTarget = prefs.getInt("batchTarget", 0),
             pendingOutcomeIndex = prefs.getInt("pendingOutcomeIndex", -1),
             pendingLogDate = prefs.getString("pendingLogDate", "")?.ifEmpty { null },
-            pendingLogIndex = prefs.getInt("pendingLogIndex", -1)
+            pendingLogIndex = prefs.getInt("pendingLogIndex", -1),
+            awaitingWhatsAppReturn = prefs.getBoolean("awaitingWhatsAppReturn", false)
         )
     }
 

@@ -154,7 +154,12 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 Toast.makeText(this, "Previous list restored - tap 'Start' to continue calling it", Toast.LENGTH_LONG).show()
                 // If a call had ended but its outcome was never tagged (Stop pressed, app
                 // closed, crash, etc.), ask for it right away - don't wait for Start.
-                if (engine.pendingLead() != null) {
+                // Exception: if the app was specifically waiting for a WhatsApp return when it
+                // got killed, don't show the overlay again - just pick up exactly where it left
+                // off (see onResume) instead of making the user redo the WhatsApp step.
+                if (engine.isAwaitingWhatsAppReturn()) {
+                    pendingInfoOutcome = true
+                } else if (engine.pendingLead() != null) {
                     hideKeyboard()
                     binding.overlayOutcome.visibility = android.view.View.VISIBLE
                 }
@@ -565,6 +570,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             val lead = engine.pendingLead()
             if (lead != null) {
                 pendingInfoOutcome = true
+                engine.markAwaitingWhatsAppReturn()
                 openWhatsAppWithMessage(lead.phone)
             } else {
                 engine.selectOutcome(outcomeId)
