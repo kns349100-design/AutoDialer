@@ -2,8 +2,9 @@
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <solid android:color="@color/dock_bg"/>
     <corners
-        android:topLeftRadius="24dp"
-        android:topRightRadius="24dp"
+        android:topLeftRadius="28dp"
+        android:topRightRadius="28dp"
         android:bottomLeftRadius="0dp"
         android:bottomRightRadius="0dp"/>
+    <stroke android:width="0.75dp" android:color="@color/border_dark"/>
 </shape>

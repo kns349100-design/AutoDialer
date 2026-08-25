@@ -31,10 +31,10 @@ Row 1:
 ## Step 3.5 - "Users" tab me sirf headers daalo
 Row 1 (ye login system ke liye hai - phone number + PIN, koi SMS/billing nahi lagti):
 
-| Phone | PinHash | ActiveDeviceId | UpdatedAt |
-|---|---|---|---|
+| Phone | PinHash | ActiveDeviceId | UpdatedAt | FailedAttempts | LockedUntil |
+|---|---|---|---|---|---|
 
-(Baaki rows khud-ba-khud bharegi jab log pehli baar login karke apna PIN set karenge. Kisi ek number ko manually logout/reset karna ho to uski row delete kar do - agli baar wo number naya PIN set kar payega.)
+(Baaki rows khud-ba-khud bharegi jab log pehli baar login karke apna PIN set karenge. Kisi ek number ko manually logout/reset karna ho to uski row delete kar do - agli baar wo number naya PIN set kar payega. FailedAttempts/LockedUntil galat PIN baar-baar try karne pe automatic use hote hain - kisi number ko turant unlock karna ho to uski row ke in dono column me 0 likh do.)
 
 ## Step 4 - Apps Script attach karo
 1. Sheet ke top menu me **Extensions -> Apps Script**

@@ -1,27 +1,46 @@
 <resources>
-    <color name="bg_dark">#0A0A0B</color>
-    <color name="surface_dark">#1A1A1D</color>
-    <color name="surface_dark_2">#1E1E20</color>
-    <color name="border_dark">#2C2C2A</color>
-    <color name="text_primary_dark">#F5F5F5</color>
-    <color name="text_secondary_dark">#B4B2A9</color>
-    <color name="text_muted_dark">#5F5E5A</color>
+    <color name="bg_dark">#0D0E1A</color>
+    <color name="surface_dark">#171827</color>
+    <color name="surface_dark_2">#1E2038</color>
+    <color name="border_dark">#2B2D48</color>
+    <color name="text_primary_dark">#F6F7FC</color>
+    <color name="text_secondary_dark">#A2A4C4</color>
+    <color name="text_muted_dark">#5E6089</color>
 
-    <color name="resume_bg">#2E7CF6</color>
+    <color name="resume_bg">#4C6FFF</color>
     <color name="resume_text">#FFFFFF</color>
-    <color name="no_bg">#FF3B5C</color>
+    <color name="no_bg">#FF4D6D</color>
     <color name="no_text">#FFFFFF</color>
-    <color name="positive_bg">#2ED47A</color>
-    <color name="positive_text">#06341A</color>
+    <color name="positive_bg">#25D07A</color>
+    <color name="positive_text">#053B21</color>
     <color name="info_bg">#FFB020</color>
-    <color name="info_text">#412402</color>
-    <color name="load_bg_idle">#1B3A66</color>
-    <color name="load_bg_active">#2E7CF6</color>
+    <color name="info_text">#3D2400</color>
+    <color name="load_bg_idle">#232544</color>
+    <color name="load_bg_active">#4C6FFF</color>
 
-    <color name="progress_track">#2C2C2A</color>
-    <color name="progress_fill">#2ED47A</color>
+    <color name="progress_track">#2B2D48</color>
+    <color name="progress_fill">#25D07A</color>
 
-    <color name="gradient_top">#6E3AD1</color>
-    <color name="gradient_bottom">#2A1454</color>
-    <color name="dock_bg">#1A1A1D</color>
+    <color name="gradient_top">#4C6FFF</color>
+    <color name="gradient_bottom">#8B5CF6</color>
+    <color name="dock_bg">#171827</color>
+
+    <!-- Colourful accent chips - used for list icons/badges, similar to the
+         per-service coloured icon chips in the reference design. -->
+    <color name="accent_chip_blue">#4C6FFF</color>
+    <color name="accent_chip_purple">#8B5CF6</color>
+    <color name="accent_chip_green">#25D07A</color>
+    <color name="accent_chip_pink">#FF4D9E</color>
+    <color name="accent_chip_amber">#FFB020</color>
+
+    <!-- Light pricing-page palette - used ONLY by the redesigned "Choose a Plan"
+         screen (a light card-based pricing layout), kept separate from the rest
+         of the app's dark theme so nothing else is affected. -->
+    <color name="pricing_bg">#F4F6FB</color>
+    <color name="pricing_card_bg">#FFFFFF</color>
+    <color name="pricing_border">#E6E9F5</color>
+    <color name="pricing_text_dark">#161832</color>
+    <color name="pricing_text_gray">#8083A3</color>
+    <color name="pricing_blue">#3D6BFF</color>
 </resources>
+
