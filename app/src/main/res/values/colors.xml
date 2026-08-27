@@ -42,5 +42,6 @@
     <color name="pricing_text_dark">#161832</color>
     <color name="pricing_text_gray">#8083A3</color>
     <color name="pricing_blue">#3D6BFF</color>
+    <color name="pricing_icon_chip">#EEF1FC</color>
 </resources>
 

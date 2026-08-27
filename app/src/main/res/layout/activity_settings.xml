@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/pricing_bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Top bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_pricing_icon_chip"
+                android:gravity="center"
+                android:text="←"
+                android:textColor="@color/pricing_text_dark"
+                android:textSize="18sp"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Settings"
+                android:textColor="@color/pricing_text_dark"
+                android:textSize="17sp"
+                android:textStyle="bold"/>
+
+            <View
+                android:layout_width="40dp"
+                android:layout_height="40dp"/>
+        </LinearLayout>
+
+        <!-- Search (decorative, matches reference) -->
+        <EditText
+            android:id="@+id/etSearch"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_pricing_search"
+            android:drawablePadding="10dp"
+            android:gravity="center_vertical"
+            android:hint="Type to search"
+            android:inputType="text"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:singleLine="true"
+            android:textColor="@color/pricing_text_dark"
+            android:textColorHint="@color/pricing_text_gray"
+            android:textSize="14sp"/>
+
+        <!-- General -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="General"
+            android:textColor="@color/pricing_text_dark"
+            android:textSize="20sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="14dp"
+            android:text="Your leads, history and plan"
+            android:textColor="@color/pricing_text_gray"
+            android:textSize="13sp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_pricing_section"
+            android:padding="8dp">
+
+            <include layout="@layout/row_settings_item"
+                android:id="@+id/rowSheets"/>
+
+            <View style="@style/SettingsDivider"/>
+
+            <include layout="@layout/row_settings_item"
+                android:id="@+id/rowDashboard"/>
+
+            <View style="@style/SettingsDivider"/>
+
+            <include layout="@layout/row_settings_item"
+                android:id="@+id/rowPlan"/>
+        </LinearLayout>
+
+        <!-- Calling -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="Calling"
+            android:textColor="@color/pricing_text_dark"
+            android:textSize="20sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="14dp"
+            android:text="Customize how calls flow"
+            android:textColor="@color/pricing_text_gray"
+            android:textSize="13sp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_pricing_section"
+            android:padding="8dp">
+
+            <include layout="@layout/row_settings_item"
+                android:id="@+id/rowInfoMessage"/>
+
+            <View style="@style/SettingsDivider"/>
+
+            <include layout="@layout/row_settings_item"
+                android:id="@+id/rowCustomOutcome"/>
+
+            <View style="@style/SettingsDivider"/>
+
+            <include layout="@layout/row_settings_item"
+                android:id="@+id/rowBatchLimit"/>
+        </LinearLayout>
+
+        <!-- Reliability -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="Reliability"
+            android:textColor="@color/pricing_text_dark"
+            android:textSize="20sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="14dp"
+            android:text="Keep the app running mid-list"
+            android:textColor="@color/pricing_text_gray"
+            android:textSize="13sp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_pricing_section"
+            android:padding="8dp"
+            android:layout_marginBottom="24dp">
+
+            <include layout="@layout/row_settings_item"
+                android:id="@+id/rowBattery"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

@@ -72,6 +72,19 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             }
         }
 
+    /** Handles results reported back from the new SettingsActivity for the few items whose
+     * dialogs need this Activity's own in-memory stores (see SettingsActivity's class doc). */
+    private val settingsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                when (result.data?.getStringExtra(SettingsActivity.EXTRA_ACTION)) {
+                    SettingsActivity.ACTION_EDIT_INFO_MESSAGE -> showEditInfoMessageDialog()
+                    SettingsActivity.ACTION_CUSTOM_OUTCOME -> showManageOutcomesDialog()
+                    SettingsActivity.ACTION_BATCH_LIMIT -> showBatchLimitDialog()
+                }
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -119,7 +132,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.btnStart.setOnClickListener { onStartClicked() }
         binding.btnStop.setOnClickListener { engine.stop() }
         binding.btnFloatingStop.setOnClickListener { engine.stop() }
-        binding.btnSettings.setOnClickListener { showSettingsMenu() }
+        binding.btnSettings.setOnClickListener { settingsLauncher.launch(Intent(this, SettingsActivity::class.java)) }
         binding.btnRemoveList.setOnClickListener { confirmRemoveList() }
 
         setLoadButtonActive(false)
@@ -367,37 +380,14 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         binding.btnLoadListTop.background = androidx.core.content.ContextCompat.getDrawable(this, drawableRes)
     }
 
-    /** Top-left gear icon: Sheets, Dashboard, Plan, Batch Limit, and editing the WhatsApp info message all live here. */
-    private fun showSettingsMenu() {
-        val popup = android.widget.PopupMenu(this, binding.btnSettings)
-        popup.menu.add(0, 1, 0, "Sheets")
-        popup.menu.add(0, 2, 1, "Dashboard")
-        popup.menu.add(0, 3, 2, "Edit Info Message (WhatsApp)")
-        popup.menu.add(0, 4, 3, "Plan / Subscription")
-        popup.menu.add(0, 5, 4, "+ Custom Call Option")
-        popup.menu.add(0, 6, 5, "Batch Limit (calls per session)")
-        popup.menu.add(0, 7, 6, "Stop phone from closing this app (recommended)")
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                1 -> startActivity(Intent(this, CallLogActivity::class.java))
-                2 -> startActivity(Intent(this, HistoryActivity::class.java))
-                3 -> showEditInfoMessageDialog()
-                4 -> startActivity(Intent(this, SubscriptionActivity::class.java))
-                5 -> showManageOutcomesDialog()
-                6 -> showBatchLimitDialog()
-                7 -> requestIgnoreBatteryOptimizations()
-            }
-            true
-        }
-        popup.show()
-    }
-
     /**
      * Asks the OS to stop applying battery-saving restrictions to this app. On phones with
      * aggressive background-app killers (common on Xiaomi/Vivo/Oppo/Realme), this is what
      * most often causes the app to get force-closed mid-list, making a loaded list look like
      * it "disappeared" even though it's safely saved - this removes the OS's main reason to
      * kill it in the first place, on top of the app already saving the list at every step.
+     * (Kept here too since SettingsActivity has its own copy for its "Keep App Running" row,
+     * so that screen doesn't need to round-trip back to MainActivity for it.)
      */
     private fun requestIgnoreBatteryOptimizations() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
