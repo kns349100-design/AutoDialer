@@ -1,8 +1,10 @@
 # Cashfree Payment Setup (real in-app payment, no coupon codes needed)
 
-Isse users "Pay" button dabate hi seedha unka UPI app (GPay/PhonePe/Paytm) khul jayega
-amount pre-filled ke saath — koi browser page, QR code, ya countdown timer nahi dikhega.
-"I've Paid" dabate hi automatic unlock ho jayega.
+Isse users "Pay" button dabate hi Cashfree ka payment page khulega, wahan UPI/card/netbanking
+se pay karenge, "I've Paid" dabate hi automatic unlock ho jayega.
+(Note: Cashfree ka "seedha UPI app khulne wala" Custom Checkout feature is account pe abhi
+approved nahi hai - Cashfree se request karke enable karwa sakte ho, uske baad ye upgrade
+kiya ja sakta hai. Tab tak Payment Links hi use ho raha hai kyunki wahi approved/working hai.)
 
 Apna App ID aur Secret Key Cashfree Dashboard se milega (Developers -> API Keys). In dono ko
 kabhi bhi is repo me, code me, ya kisi aur public jagah paste mat karna - sirf neeche diye
@@ -24,7 +26,7 @@ Secret Key leak hone se koi bhi fake payment mark kar sakta hai.
 
 ## Step 2 - Test karo (Test Mode keys ke saath)
 1. App build karo (SCRIPT_URL set hona chahiye, `backend/SETUP.md` dekho)
-2. "Plan" screen me koi bhi "Pay" button dabao — seedha ek UPI app khul jayega (koi browser nahi)
+2. "Plan" screen me koi bhi "Pay" button dabao — browser me Cashfree ka payment page khulega
 3. Test Mode me Cashfree ke test UPI/card se payment kar sakte ho (Cashfree docs me sandbox
    test payment details milte hain)
 4. Payment ho jaane ke baad app me wapas aao, **"I've Paid — Check Status"** button dabao —

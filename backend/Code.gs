@@ -122,15 +122,12 @@ function cashfreeHeaders() {
 /**
  * Creates a Cashfree Payment Link for the chosen plan (server-side, so the secret key never
  * touches the Android app) and returns the link URL for the app to open in the browser.
- */
-/**
- * Creates a Cashfree Order and immediately requests a UPI INTENT link for it (channel:
- * "link", not "collect"/"qrcode") - this returns a plain "upi://pay?..." deep link. The app
- * opens that directly with ACTION_VIEW, which makes Android show the installed UPI apps
- * (GPay/PhonePe/Paytm) right away - no Cashfree browser page, no QR code, no countdown timer
- * screen. The Orders API is the default-enabled product on every Cashfree account (unlike
- * Payment Links, which needs separate approval), so this also works immediately on a brand
- * new account.
+ * NOTE: an earlier version of this tried Cashfree's headless/Custom Checkout API (which opens
+ * a UPI app directly, no browser page) - that requires a separate "Custom Integration"
+ * approval from Cashfree that this account doesn't have yet, so it failed with "POST
+ * /orders/pay is not enabled or approved". Payment Links is the product that's already
+ * approved and working on this account, so it's what's used here. If Cashfree later approves
+ * Custom Checkout for this account, this can be switched back for a no-browser experience.
  */
 function handleCreatePaymentLink(e) {
   var deviceId = cleanInput(e.parameter.deviceId, 200);
@@ -153,86 +150,58 @@ function handleCreatePaymentLink(e) {
 
   if (!/^[0-9]{10}$/.test(phone)) phone = '9999999999'; // Cashfree requires a 10-digit phone
 
-  var orderId = 'AD' + planType + deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(-8) + Date.now();
-  var customerId = ('cust' + deviceId.replace(/[^a-zA-Z0-9]/g, '')).slice(0, 40);
+  var linkId = 'AD' + planType + deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(-8) + Date.now();
 
-  var orderPayload = {
-    order_id: orderId,
-    order_amount: amountRupees,
-    order_currency: 'INR',
+  var payload = {
+    link_id: linkId,
+    link_amount: amountRupees,
+    link_currency: 'INR',
+    link_purpose: 'AutoDialer ' + planType,
     customer_details: {
-      customer_id: customerId,
       customer_phone: phone,
       customer_name: 'AutoDialer User'
-    }
+    },
+    link_notify: { send_sms: false, send_email: false },
+    link_auto_reminders: false
   };
 
-  var orderResponse;
+  var response;
   try {
-    orderResponse = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/orders', {
+    response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/links', {
       method: 'post',
       headers: cashfreeHeaders(),
-      payload: JSON.stringify(orderPayload),
+      payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
   } catch (err) {
     return jsonResponse({ status: 'error', message: 'Cashfree se contact nahi ho paya' });
   }
 
-  var order;
+  var result;
   try {
-    order = JSON.parse(orderResponse.getContentText());
+    result = JSON.parse(response.getContentText());
   } catch (err) {
     return jsonResponse({ status: 'error', message: 'Cashfree se galat response mila' });
   }
 
-  if (!order.payment_session_id) {
-    return jsonResponse({ status: 'error', message: 'Order nahi ban paya: ' + (order.message || JSON.stringify(order)) });
+  if (!result.link_url) {
+    return jsonResponse({ status: 'error', message: 'Payment link nahi ban paya: ' + (result.message || JSON.stringify(result)) });
   }
 
-  var sessionPayload = {
-    payment_session_id: order.payment_session_id,
-    payment_method: { upi: { channel: 'link' } }
-  };
-
-  var sessionResponse;
-  try {
-    sessionResponse = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/orders/sessions', {
-      method: 'post',
-      headers: cashfreeHeaders(),
-      payload: JSON.stringify(sessionPayload),
-      muteHttpExceptions: true
-    });
-  } catch (err) {
-    return jsonResponse({ status: 'error', message: 'UPI intent nahi ban paya' });
-  }
-
-  var session;
-  try {
-    session = JSON.parse(sessionResponse.getContentText());
-  } catch (err) {
-    return jsonResponse({ status: 'error', message: 'Cashfree se galat response mila' });
-  }
-
-  var upiIntentUrl = session.data && session.data.payload && session.data.payload.default;
-  if (!upiIntentUrl) {
-    return jsonResponse({ status: 'error', message: 'UPI intent nahi ban paya: ' + (session.message || JSON.stringify(session)) });
-  }
-
-  return jsonResponse({ status: 'ok', linkUrl: upiIntentUrl, linkId: orderId, planType: planType });
+  return jsonResponse({ status: 'ok', linkUrl: result.link_url, linkId: linkId, planType: planType });
 }
 
 /**
- * Checks a Cashfree Order's status directly with Cashfree's servers and grants access if
- * it's really been paid and the amount matches the plan. Locked so two near-simultaneous
- * status checks for the same order can never both append an Activations row.
+ * Checks a Cashfree Payment Link's status directly with Cashfree's servers and grants
+ * access if it's really been paid and the amount matches the plan. Locked so two near-
+ * simultaneous status checks for the same link can never both append an Activations row.
  */
 function handleCheckPayment(e) {
-  var orderId = cleanInput(e.parameter.linkId, 100);
+  var linkId = cleanInput(e.parameter.linkId, 100);
   var deviceId = cleanInput(e.parameter.deviceId, 200);
   var planType = cleanInput(e.parameter.planType, 20).toUpperCase();
 
-  if (!orderId || !deviceId || !planType) {
+  if (!linkId || !deviceId || !planType) {
     return jsonResponse({ status: 'error', message: 'missing params' });
   }
 
@@ -246,14 +215,14 @@ function handleCheckPayment(e) {
     var actSheet = getSheet('Activations');
     var existing = actSheet.getDataRange().getValues();
     for (var i = 1; i < existing.length; i++) {
-      if (String(existing[i][1]) === orderId) {
+      if (String(existing[i][1]) === linkId) {
         return jsonResponse({ status: 'ok', expiryAt: Number(existing[i][3]), planType: existing[i][4] });
       }
     }
 
     var response;
     try {
-      response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/orders/' + encodeURIComponent(orderId), {
+      response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/links/' + encodeURIComponent(linkId), {
         headers: cashfreeHeaders(),
         muteHttpExceptions: true
       });
@@ -261,25 +230,25 @@ function handleCheckPayment(e) {
       return jsonResponse({ status: 'error', message: 'Cashfree se contact nahi ho paya' });
     }
 
-    var order;
+    var link;
     try {
-      order = JSON.parse(response.getContentText());
+      link = JSON.parse(response.getContentText());
     } catch (err) {
       return jsonResponse({ status: 'error', message: 'Cashfree se galat response mila' });
     }
 
-    if (order.order_status !== 'PAID') {
-      return jsonResponse({ status: 'error', message: 'Payment abhi complete nahi hua (status: ' + (order.order_status || 'unknown') + ')' });
+    if (link.link_status !== 'PAID') {
+      return jsonResponse({ status: 'error', message: 'Payment abhi complete nahi hua (status: ' + (link.link_status || 'unknown') + ')' });
     }
     // Small tolerance for float rounding (e.g. Cashfree returning 9.999999 for 10).
-    if (Number(order.order_amount) < expectedAmountRupees - 0.5) {
+    if (Number(link.link_amount_paid) < expectedAmountRupees - 0.5) {
       return jsonResponse({ status: 'error', message: 'Payment amount plan se match nahi karta' });
     }
 
     var now = Date.now();
     var expiryAt = grantExpiry(planType, now);
 
-    actSheet.appendRow([safeCell(deviceId), safeCell(orderId), now, expiryAt, planType, false]);
+    actSheet.appendRow([safeCell(deviceId), safeCell(linkId), now, expiryAt, planType, false]);
 
     return jsonResponse({ status: 'ok', expiryAt: expiryAt, planType: planType });
   });
