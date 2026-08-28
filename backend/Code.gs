@@ -43,7 +43,6 @@ function doGet(e) {
     if (action === 'check') return handleCheck(e);
     if (action === 'createPaymentLink') return handleCreatePaymentLink(e);
     if (action === 'checkPayment') return handleCheckPayment(e);
-    if (action === 'payPage') return handlePayPage(e);
     if (action === 'login') return handleLogin(e);
     if (action === 'resetPin') return handleResetPin(e);
     if (action === 'checkSession') return handleCheckSession(e);
@@ -187,37 +186,19 @@ function handleCreatePaymentLink(e) {
   }
 
   var isProd = PropertiesService.getScriptProperties().getProperty('CASHFREE_ENV') === 'PROD';
-  var payUrl = ScriptApp.getService().getUrl() +
-    '?action=payPage&session=' + encodeURIComponent(order.payment_session_id) +
+  // Points at a small static page hosted on GitHub Pages (a fixed, whitelist-able domain) -
+  // Apps Script's own content domain changes between deployments, so Cashfree can't whitelist
+  // it reliably. Set GITHUB_PAGES_URL in Script Properties once GitHub Pages is enabled, e.g.
+  // https://<your-github-username>.github.io/<repo-name>/checkout.html
+  var checkoutPageUrl = PropertiesService.getScriptProperties().getProperty('GITHUB_PAGES_URL');
+  if (!checkoutPageUrl) {
+    return jsonResponse({ status: 'error', message: 'GITHUB_PAGES_URL backend me set nahi hai - CASHFREE_SETUP.md dekho' });
+  }
+  var payUrl = checkoutPageUrl +
+    '?session=' + encodeURIComponent(order.payment_session_id) +
     '&mode=' + (isProd ? 'production' : 'sandbox');
 
   return jsonResponse({ status: 'ok', linkUrl: payUrl, linkId: orderId, planType: planType });
-}
-
-/**
- * Serves a tiny self-contained page that loads Cashfree's own official JS SDK and hands off
- * to their Standard Checkout hosted page - this is the normal, always-available way to accept
- * a payment on any Cashfree account (no special product approval needed), unlike the Payment
- * Links / Custom Checkout APIs that returned "not enabled or approved" on this account.
- */
-function handlePayPage(e) {
-  var session = String(e.parameter.session || '');
-  var mode = (String(e.parameter.mode || '') === 'production') ? 'production' : 'sandbox';
-
-  var html =
-    '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0D0E1A;color:#F6F7FC;}</style>' +
-    '</head><body>' +
-    '<div>Opening secure payment page…</div>' +
-    '<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>' +
-    '<script>' +
-    'var cashfree = Cashfree({ mode: "' + mode + '" });' +
-    'cashfree.checkout({ paymentSessionId: "' + session + '", redirectTarget: "_self" });' +
-    '</script>' +
-    '</body></html>';
-
-  return HtmlService.createHtmlOutput(html)
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**

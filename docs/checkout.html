@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoDialer Payment</title>
+  <style>
+    body {
+      font-family: -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background: #0D0E1A;
+      color: #F6F7FC;
+      text-align: center;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #msg { font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div id="msg">Opening secure payment page…</div>
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+  <script>
+    function getParam(name) {
+      var params = new URLSearchParams(window.location.search);
+      return params.get(name);
+    }
+    var session = getParam('session');
+    var mode = getParam('mode') === 'production' ? 'production' : 'sandbox';
+
+    if (!session) {
+      document.getElementById('msg').textContent = 'Missing payment session - go back and try again.';
+    } else {
+      try {
+        var cashfree = Cashfree({ mode: mode });
+        cashfree.checkout({ paymentSessionId: session, redirectTarget: '_self' });
+      } catch (e) {
+        document.getElementById('msg').textContent = 'Could not open payment page: ' + e.message;
+      }
+    }
+  </script>
+</body>
+</html>
