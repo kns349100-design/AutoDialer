@@ -87,7 +87,7 @@ class SubscriptionActivity : AppCompatActivity() {
                 try {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl)))
                     binding.tvPaymentResult.text =
-                        "Complete the payment in the browser, then come back and tap \"I've Paid\" below."
+                        "Complete the payment on the page that opens, then come back and tap \"I've Paid\" below."
                     binding.btnCheckPayment.visibility = android.view.View.VISIBLE
                 } catch (e: Exception) {
                     Toast.makeText(this, "Could not open payment page", Toast.LENGTH_LONG).show()

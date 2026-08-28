@@ -1,10 +1,11 @@
 # Cashfree Payment Setup (real in-app payment, no coupon codes needed)
 
-Isse users "Pay" button dabate hi Cashfree ka payment page khulega, wahan UPI/card/netbanking
-se pay karenge, "I've Paid" dabate hi automatic unlock ho jayega.
-(Note: Cashfree ka "seedha UPI app khulne wala" Custom Checkout feature is account pe abhi
-approved nahi hai - Cashfree se request karke enable karwa sakte ho, uske baad ye upgrade
-kiya ja sakta hai. Tab tak Payment Links hi use ho raha hai kyunki wahi approved/working hai.)
+Isse users "Pay" button dabate hi Cashfree ka Standard Checkout (official hosted payment) page
+khulega, wahan UPI/card/netbanking se pay karenge, "I've Paid" dabate hi automatic unlock ho
+jayega.
+(Note: is account pe Payment Links aur Custom/Headless Checkout dono "not enabled/approved"
+error de rahe the - Standard Checkout wahi ek flow hai jo har Cashfree account ko by-default
+milta hai, koi extra approval nahi chahiye, isliye yahi use ho raha hai.)
 
 Apna App ID aur Secret Key Cashfree Dashboard se milega (Developers -> API Keys). In dono ko
 kabhi bhi is repo me, code me, ya kisi aur public jagah paste mat karna - sirf neeche diye

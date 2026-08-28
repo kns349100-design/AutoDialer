@@ -43,6 +43,7 @@ function doGet(e) {
     if (action === 'check') return handleCheck(e);
     if (action === 'createPaymentLink') return handleCreatePaymentLink(e);
     if (action === 'checkPayment') return handleCheckPayment(e);
+    if (action === 'payPage') return handlePayPage(e);
     if (action === 'login') return handleLogin(e);
     if (action === 'resetPin') return handleResetPin(e);
     if (action === 'checkSession') return handleCheckSession(e);
@@ -120,14 +121,12 @@ function cashfreeHeaders() {
 }
 
 /**
- * Creates a Cashfree Payment Link for the chosen plan (server-side, so the secret key never
- * touches the Android app) and returns the link URL for the app to open in the browser.
- * NOTE: an earlier version of this tried Cashfree's headless/Custom Checkout API (which opens
- * a UPI app directly, no browser page) - that requires a separate "Custom Integration"
- * approval from Cashfree that this account doesn't have yet, so it failed with "POST
- * /orders/pay is not enabled or approved". Payment Links is the product that's already
- * approved and working on this account, so it's what's used here. If Cashfree later approves
- * Custom Checkout for this account, this can be switched back for a no-browser experience.
+ * Creates a Cashfree Order and returns a URL (pointing back at this same Apps Script Web
+ * App) that shows a tiny auto-redirecting page using Cashfree's official JS SDK - this is
+ * Cashfree's "Standard Checkout", the one flow every account gets by default with zero extra
+ * approval (unlike Payment Links and Custom/Headless Checkout, both of which returned "not
+ * enabled or approved" errors on this account). Order creation itself was already confirmed
+ * working earlier, so this routes entirely through calls that are proven to work.
  */
 function handleCreatePaymentLink(e) {
   var deviceId = cleanInput(e.parameter.deviceId, 200);
@@ -150,58 +149,88 @@ function handleCreatePaymentLink(e) {
 
   if (!/^[0-9]{10}$/.test(phone)) phone = '9999999999'; // Cashfree requires a 10-digit phone
 
-  var linkId = 'AD' + planType + deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(-8) + Date.now();
+  var orderId = 'AD' + planType + deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(-8) + Date.now();
+  var customerId = ('cust' + deviceId.replace(/[^a-zA-Z0-9]/g, '')).slice(0, 40);
 
-  var payload = {
-    link_id: linkId,
-    link_amount: amountRupees,
-    link_currency: 'INR',
-    link_purpose: 'AutoDialer ' + planType,
+  var orderPayload = {
+    order_id: orderId,
+    order_amount: amountRupees,
+    order_currency: 'INR',
     customer_details: {
+      customer_id: customerId,
       customer_phone: phone,
       customer_name: 'AutoDialer User'
-    },
-    link_notify: { send_sms: false, send_email: false },
-    link_auto_reminders: false
+    }
   };
 
-  var response;
+  var orderResponse;
   try {
-    response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/links', {
+    orderResponse = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/orders', {
       method: 'post',
       headers: cashfreeHeaders(),
-      payload: JSON.stringify(payload),
+      payload: JSON.stringify(orderPayload),
       muteHttpExceptions: true
     });
   } catch (err) {
     return jsonResponse({ status: 'error', message: 'Cashfree se contact nahi ho paya' });
   }
 
-  var result;
+  var order;
   try {
-    result = JSON.parse(response.getContentText());
+    order = JSON.parse(orderResponse.getContentText());
   } catch (err) {
     return jsonResponse({ status: 'error', message: 'Cashfree se galat response mila' });
   }
 
-  if (!result.link_url) {
-    return jsonResponse({ status: 'error', message: 'Payment link nahi ban paya: ' + (result.message || JSON.stringify(result)) });
+  if (!order.payment_session_id) {
+    return jsonResponse({ status: 'error', message: 'Order nahi ban paya: ' + (order.message || JSON.stringify(order)) });
   }
 
-  return jsonResponse({ status: 'ok', linkUrl: result.link_url, linkId: linkId, planType: planType });
+  var isProd = PropertiesService.getScriptProperties().getProperty('CASHFREE_ENV') === 'PROD';
+  var payUrl = ScriptApp.getService().getUrl() +
+    '?action=payPage&session=' + encodeURIComponent(order.payment_session_id) +
+    '&mode=' + (isProd ? 'production' : 'sandbox');
+
+  return jsonResponse({ status: 'ok', linkUrl: payUrl, linkId: orderId, planType: planType });
 }
 
 /**
- * Checks a Cashfree Payment Link's status directly with Cashfree's servers and grants
- * access if it's really been paid and the amount matches the plan. Locked so two near-
- * simultaneous status checks for the same link can never both append an Activations row.
+ * Serves a tiny self-contained page that loads Cashfree's own official JS SDK and hands off
+ * to their Standard Checkout hosted page - this is the normal, always-available way to accept
+ * a payment on any Cashfree account (no special product approval needed), unlike the Payment
+ * Links / Custom Checkout APIs that returned "not enabled or approved" on this account.
+ */
+function handlePayPage(e) {
+  var session = String(e.parameter.session || '');
+  var mode = (String(e.parameter.mode || '') === 'production') ? 'production' : 'sandbox';
+
+  var html =
+    '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0D0E1A;color:#F6F7FC;}</style>' +
+    '</head><body>' +
+    '<div>Opening secure payment page…</div>' +
+    '<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>' +
+    '<script>' +
+    'var cashfree = Cashfree({ mode: "' + mode + '" });' +
+    'cashfree.checkout({ paymentSessionId: "' + session + '", redirectTarget: "_self" });' +
+    '</script>' +
+    '</body></html>';
+
+  return HtmlService.createHtmlOutput(html)
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Checks a Cashfree Order's status directly with Cashfree's servers and grants access if
+ * it's really been paid and the amount matches the plan. Locked so two near-simultaneous
+ * status checks for the same order can never both append an Activations row.
  */
 function handleCheckPayment(e) {
-  var linkId = cleanInput(e.parameter.linkId, 100);
+  var orderId = cleanInput(e.parameter.linkId, 100);
   var deviceId = cleanInput(e.parameter.deviceId, 200);
   var planType = cleanInput(e.parameter.planType, 20).toUpperCase();
 
-  if (!linkId || !deviceId || !planType) {
+  if (!orderId || !deviceId || !planType) {
     return jsonResponse({ status: 'error', message: 'missing params' });
   }
 
@@ -215,14 +244,14 @@ function handleCheckPayment(e) {
     var actSheet = getSheet('Activations');
     var existing = actSheet.getDataRange().getValues();
     for (var i = 1; i < existing.length; i++) {
-      if (String(existing[i][1]) === linkId) {
+      if (String(existing[i][1]) === orderId) {
         return jsonResponse({ status: 'ok', expiryAt: Number(existing[i][3]), planType: existing[i][4] });
       }
     }
 
     var response;
     try {
-      response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/links/' + encodeURIComponent(linkId), {
+      response = UrlFetchApp.fetch(cashfreeBaseUrl() + '/pg/orders/' + encodeURIComponent(orderId), {
         headers: cashfreeHeaders(),
         muteHttpExceptions: true
       });
@@ -230,25 +259,25 @@ function handleCheckPayment(e) {
       return jsonResponse({ status: 'error', message: 'Cashfree se contact nahi ho paya' });
     }
 
-    var link;
+    var order;
     try {
-      link = JSON.parse(response.getContentText());
+      order = JSON.parse(response.getContentText());
     } catch (err) {
       return jsonResponse({ status: 'error', message: 'Cashfree se galat response mila' });
     }
 
-    if (link.link_status !== 'PAID') {
-      return jsonResponse({ status: 'error', message: 'Payment abhi complete nahi hua (status: ' + (link.link_status || 'unknown') + ')' });
+    if (order.order_status !== 'PAID') {
+      return jsonResponse({ status: 'error', message: 'Payment abhi complete nahi hua (status: ' + (order.order_status || 'unknown') + ')' });
     }
     // Small tolerance for float rounding (e.g. Cashfree returning 9.999999 for 10).
-    if (Number(link.link_amount_paid) < expectedAmountRupees - 0.5) {
+    if (Number(order.order_amount) < expectedAmountRupees - 0.5) {
       return jsonResponse({ status: 'error', message: 'Payment amount plan se match nahi karta' });
     }
 
     var now = Date.now();
     var expiryAt = grantExpiry(planType, now);
 
-    actSheet.appendRow([safeCell(deviceId), safeCell(linkId), now, expiryAt, planType, false]);
+    actSheet.appendRow([safeCell(deviceId), safeCell(orderId), now, expiryAt, planType, false]);
 
     return jsonResponse({ status: 'ok', expiryAt: expiryAt, planType: planType });
   });
