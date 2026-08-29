@@ -4,74 +4,104 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:background="@drawable/bg_card"
+    android:background="@drawable/bg_pricing_card"
     android:padding="12dp"
     android:layout_marginBottom="8dp">
 
     <TextView
-        android:id="@+id/tvLogTime"
-        android:layout_width="wrap_content"
+        android:id="@+id/tvIndex"
+        android:layout_width="24dp"
         android:layout_height="wrap_content"
-        android:textColor="@color/text_muted_dark"
-        android:textSize="11sp"
-        android:text="00:00"/>
+        android:gravity="center"
+        android:textColor="@color/pricing_text_gray"
+        android:textSize="12sp"
+        android:text="1"/>
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_weight="1"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:layout_marginStart="10dp">
+        android:layout_marginStart="8dp">
 
         <TextView
             android:id="@+id/tvLogName"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/text_primary_dark"
-            android:textSize="13sp"
+            android:textColor="@color/pricing_text_dark"
+            android:textStyle="bold"
+            android:textSize="14sp"
             android:text="Number"/>
 
         <TextView
             android:id="@+id/tvLogStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/text_muted_dark"
+            android:layout_marginTop="2dp"
+            android:textColor="@color/pricing_text_gray"
             android:textSize="11sp"
             android:text="Status"/>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:id="@+id/tvLogOutcome"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:textSize="10sp"
+                android:visibility="gone"
+                android:text="Tag"/>
+
+            <TextView
+                android:id="@+id/tvCollected"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:textSize="10sp"
+                android:visibility="gone"
+                android:text="Mark Collected"/>
+        </LinearLayout>
     </LinearLayout>
 
     <TextView
-        android:id="@+id/tvLogOutcome"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
-        android:textSize="10sp"
-        android:visibility="gone"
-        android:text="Tag"/>
+        android:id="@+id/btnCall"
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/bg_pricing_icon_chip"
+        android:gravity="center"
+        android:text="📞"
+        android:textSize="14sp"/>
 
     <TextView
-        android:id="@+id/tvCollected"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
-        android:textSize="10sp"
-        android:visibility="gone"
-        android:text="Mark Collected"/>
+        android:id="@+id/btnMessage"
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/bg_pricing_icon_chip"
+        android:gravity="center"
+        android:text="💬"
+        android:textSize="14sp"/>
 
     <TextView
         android:id="@+id/tvDeleteRow"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="10dp"
+        android:layout_marginStart="8dp"
         android:padding="6dp"
-        android:textColor="@color/no_bg"
+        android:textColor="@color/pricing_text_gray"
         android:textSize="16sp"
         android:text="✕"/>
 

@@ -137,6 +137,19 @@ Ye poora process phone ke Chrome browser se ho sakta hai, GitHub ki free service
 
 - App **Call** aur **Phone State** permission maangega — dono **Allow** karna zaruri hai, warna app kaam nahi karega
 - Kuch phones (Xiaomi, Vivo, Oppo) me "Autostart" / "Battery optimization" band karni pad sakti hai taaki background me call state detect ho sake
+- **Plan/Payment screen pe "Read SMS" permission bhi maangega — ye Allow karna zaruri hai**, isi se payment automatic verify hoti hai (bank ka "credited" SMS padh ke turant unlock karta hai, koi code ya screenshot nahi chahiye)
+
+### Install karte waqt "App blocked to protect your device" warning aaye to
+Ye warning **Google Play Protect** ki taraf se aati hai kyunki app SMS padhne ki permission maangta hai
+(payment verify karne ke liye) — ye normal hai, app safe hai, bas Play Store ke bahar install
+hone wale kisi bhi app ko ye sensitive permission ke saath ye warning dikhti hai. Har naye customer
+ko ye ek baar dikhegi, unhe ye steps batao:
+
+1. Warning dialog me **"AutoDialer"** wale row pe tap karo (usually "Install anyway" jaisa option
+   expand ho jata hai) - agar wo dikhe to "Install anyway" dabao aur aage badho
+2. Agar wo option na dikhe: **Settings → Google → Security → Google Play Protect → gear icon (⚙️)
+   → "Scan apps with Play Protect"** ko temporarily **OFF** karo, phir APK dobara install karo
+3. Install hone ke baad Play Protect ko wapas **ON** kar sakte ho (sirf install ke waqt band karna tha)
 
 ## Zaruri baat (dhyan dena)
 
