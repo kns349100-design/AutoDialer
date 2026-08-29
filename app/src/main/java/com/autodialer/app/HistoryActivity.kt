@@ -1,5 +1,7 @@
 package com.autodialer.app
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -35,7 +37,9 @@ class HistoryActivity : AppCompatActivity() {
             mutableListOf(),
             outcomeStore,
             onDelete = { position -> confirmDeleteRow(position) },
-            onToggleCollected = { position -> toggleCollected(position) }
+            onToggleCollected = { position -> toggleCollected(position) },
+            onCall = { position -> callEntry(position) },
+            onMessage = { position -> messageEntry(position) }
         )
         binding.rvHistory.layoutManager = LinearLayoutManager(this)
         binding.rvHistory.adapter = adapter
@@ -74,6 +78,27 @@ class HistoryActivity : AppCompatActivity() {
         val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
         store.toggleCollected(store.todayKey(), storageIndex)
         loadToday()
+    }
+
+    /** Opens the phone dialer pre-filled with this row's number (no CALL_PHONE permission needed). */
+    private fun callEntry(displayPosition: Int) {
+        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
+        val entry = store.loadDay(store.todayKey()).getOrNull(storageIndex) ?: return
+        try {
+            startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${entry.phone}")))
+        } catch (e: Exception) {
+        }
+    }
+
+    /** Opens WhatsApp chat with this row's number. */
+    private fun messageEntry(displayPosition: Int) {
+        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
+        val entry = store.loadDay(store.todayKey()).getOrNull(storageIndex) ?: return
+        val digits = entry.phone.filter { it.isDigit() }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")))
+        } catch (e: Exception) {
+        }
     }
 
     private fun confirmDeleteRow(displayPosition: Int) {
