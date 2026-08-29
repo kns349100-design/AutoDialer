@@ -323,7 +323,7 @@
             android:textColor="@color/pricing_blue"
             android:textStyle="bold"
             android:textSize="13sp"
-            android:text="I'VE PAID — CHECK STATUS"
+            android:text="Not activated yet? Send screenshot on WhatsApp"
             android:visibility="gone"/>
 
         <!-- Referral / coupon code -->

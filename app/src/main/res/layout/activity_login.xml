@@ -48,7 +48,7 @@
             android:orientation="horizontal"
             android:layout_marginTop="32dp"
             android:gravity="center_vertical"
-            android:background="@drawable/bg_input_light"
+            android:background="@drawable/bg_login_input"
             android:padding="4dp">
 
             <TextView
@@ -93,7 +93,7 @@
             android:textSize="18sp"
             android:letterSpacing="0.3"
             android:gravity="center"
-            android:background="@drawable/bg_input_light"
+            android:background="@drawable/bg_login_input"
             android:padding="16dp"/>
 
         <TextView
@@ -161,7 +161,7 @@
                 android:textSize="18sp"
                 android:letterSpacing="0.3"
                 android:gravity="center"
-                android:background="@drawable/bg_input_light"
+                android:background="@drawable/bg_login_input"
                 android:padding="16dp"/>
 
             <TextView

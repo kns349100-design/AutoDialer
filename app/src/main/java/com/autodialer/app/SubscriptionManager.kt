@@ -30,6 +30,13 @@ class SubscriptionManager(private val context: Context) {
 
         const val TRIAL_DURATION_MS = 24L * 60 * 60 * 1000 // 1 day
 
+        /** UPI ID payments go to directly (no gateway, no whitelisting delay - money lands
+         * straight in this account). Used for the "Pay via UPI" flow: opens the user's UPI
+         * app with the amount pre-filled, they pay, then send a screenshot on WhatsApp and
+         * get a redeem code activated manually. */
+        const val UPI_VPA = "kamleshshinde4748@okaxis"
+        const val UPI_PAYEE_NAME = "Kamlesh Nana Shinde"
+
         const val PRICE_HOURLY12_PAISE = 1000   // Rs 10
         const val PRICE_MONTHLY_PAISE = 30000   // Rs 300
         const val PRICE_YEARLY_PAISE = 100000   // Rs 1000
@@ -116,6 +123,22 @@ class SubscriptionManager(private val context: Context) {
     }
 
     /** Redeems a coupon code against the server. Calls back on the main thread with a result message. */
+    /** Grants the plan immediately on this device without any server round-trip - used right
+     * after an incoming bank/UPI SMS confirms the payment actually landed (see
+     * SmsPaymentVerifier), so access unlocks the instant the SMS arrives with zero delay. */
+    fun grantPlanLocally(planType: String) {
+        val now = System.currentTimeMillis()
+        val expiryAt = when (planType) {
+            "YEARLY" -> now + (365L * 24 * 60 * 60 * 1000)
+            "HOURLY12" -> now + (12L * 60 * 60 * 1000)
+            else -> now + (30L * 24 * 60 * 60 * 1000) // MONTHLY
+        }
+        prefs.edit()
+            .putLong("cachedExpiry", expiryAt)
+            .putString("cachedPlanType", planType)
+            .apply()
+    }
+
     fun redeemCode(rawCode: String, onResult: (success: Boolean, message: String) -> Unit) {
         if (SCRIPT_URL.startsWith("PASTE_")) {
             onResult(false, "Backend URL is not set - follow backend/SETUP.md")
