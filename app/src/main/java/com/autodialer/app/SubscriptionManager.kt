@@ -151,30 +151,102 @@ class SubscriptionManager(private val context: Context) {
     }
 
     /** Redeems a coupon code against the server. Calls back on the main thread with a result message. */
-    /** Grants the plan immediately on this device without any server round-trip - used right
-     * after an incoming bank/UPI SMS confirms the payment actually landed (see
-     * SmsPaymentVerifier), so access unlocks the instant the SMS arrives with zero delay. */
+    /** Grants the plan the instant an incoming bank/UPI SMS confirms the payment actually
+     * landed (see SmsPaymentVerifier) - no server round-trip, so access unlocks immediately.
+     *
+     * Money-safety rule: this always EXTENDS from whichever is later - "now" or the current
+     * expiry - it never resets/shortens existing time. Without this, someone with months left
+     * on a longer plan who buys a shorter one (by mistake, or to add a top-up) would have
+     * their remaining time silently wiped out and replaced by the shorter plan's duration -
+     * that would mean real money they already paid for is lost. This guarantees a payment can
+     * only ever add time, never remove it.
+     */
     fun grantPlanLocally(planType: String) {
         val now = System.currentTimeMillis()
-        val expiryAt = when (planType) {
-            "YEARLY" -> now + (365L * 24 * 60 * 60 * 1000)
-            "HOURLY12" -> now + (12L * 60 * 60 * 1000)
-            else -> now + (30L * 24 * 60 * 60 * 1000) // MONTHLY
-        }
+        val durationMs = planDurationMs(planType)
+        val base = maxOf(cachedExpiry(), now)
+        val newExpiry = base + durationMs
         prefs.edit()
-            .putLong("cachedExpiry", expiryAt)
+            .putLong("cachedExpiry", newExpiry)
             .putString("cachedPlanType", planType)
             .apply()
     }
 
-    fun redeemCode(rawCode: String, onResult: (success: Boolean, message: String) -> Unit) {
+    private fun planDurationMs(planType: String): Long = when (planType) {
+        "YEARLY" -> 365L * 24 * 60 * 60 * 1000
+        "HOURLY12" -> 12L * 60 * 60 * 1000
+        else -> 30L * 24 * 60 * 60 * 1000 // MONTHLY
+    }
+
+    /** Human-friendly plan name + price, for the "payment confirmed" screen and anywhere else
+     * a plan needs to be shown clearly to the person who just paid for it. */
+    fun planDisplayInfo(planType: String): Pair<String, String> = when (planType) {
+        "HOURLY12" -> "12 Hour Access" to PRICE_HOURLY12
+        "MONTHLY" -> "1 Month Access" to PRICE_MONTHLY
+        "YEARLY" -> "1 Year Access" to PRICE_YEARLY
+        else -> planType to ""
+    }
+
+    /** The exact date/time the current plan (or trial) runs out, e.g. "12 Sep 2026, 6:40 PM" -
+     * shown on the congratulations screen so it's unambiguous exactly what was bought. */
+    fun expiryDateLabel(): String {
+        val expiry = if (isSubscribed()) cachedExpiry() else trialStartedAt() + TRIAL_DURATION_MS
+        val fmt = java.text.SimpleDateFormat("d MMM yyyy, h:mm a", java.util.Locale.getDefault())
+        return fmt.format(java.util.Date(expiry))
+    }
+
+    // ---- Pending payment tracking (survives the app/Activity being killed while waiting) ----
+    // If the app gets killed by Android while the user is off in their UPI app (very common -
+    // switching apps often triggers this on low-RAM phones), a plain in-memory variable
+    // tracking "a payment is in progress" would be lost, and the automatic SMS check would
+    // never resume when they come back - they'd have paid with no way to know to follow up.
+    // Persisting this to disk means the check always resumes correctly no matter what happens
+    // to the app process in between.
+
+    fun savePendingPayment(planType: String, amountRupees: Int, startedAt: Long, reference: String) {
+        prefs.edit()
+            .putString("pendingPayPlanType", planType)
+            .putInt("pendingPayAmount", amountRupees)
+            .putLong("pendingPayStartedAt", startedAt)
+            .putString("pendingPayReference", reference)
+            .apply()
+    }
+
+    fun clearPendingPayment() {
+        prefs.edit()
+            .remove("pendingPayPlanType")
+            .remove("pendingPayAmount")
+            .remove("pendingPayStartedAt")
+            .remove("pendingPayReference")
+            .apply()
+    }
+
+    data class PendingPayment(val planType: String, val amountRupees: Int, val startedAt: Long, val reference: String)
+
+    /** Returns the in-progress payment (if any) that hasn't been confirmed or given up on yet.
+     * A pending payment older than 24 hours is treated as abandoned and cleared automatically,
+     * so a very old, forgotten attempt can never suddenly auto-activate from a coincidental
+     * SMS much later. */
+    fun loadPendingPayment(): PendingPayment? {
+        val planType = prefs.getString("pendingPayPlanType", null) ?: return null
+        val startedAt = prefs.getLong("pendingPayStartedAt", 0L)
+        if (startedAt == 0L || System.currentTimeMillis() - startedAt > 24L * 60 * 60 * 1000) {
+            clearPendingPayment()
+            return null
+        }
+        val amount = prefs.getInt("pendingPayAmount", 0)
+        val reference = prefs.getString("pendingPayReference", "") ?: ""
+        return PendingPayment(planType, amount, startedAt, reference)
+    }
+
+    fun redeemCode(rawCode: String, onResult: (success: Boolean, message: String, planType: String?) -> Unit) {
         if (SCRIPT_URL.startsWith("PASTE_")) {
-            onResult(false, "Backend URL is not set - follow backend/SETUP.md")
+            onResult(false, "Backend URL is not set - follow backend/SETUP.md", null)
             return
         }
         val code = rawCode.trim()
         if (code.isEmpty()) {
-            onResult(false, "Enter a code")
+            onResult(false, "Enter a code", null)
             return
         }
         Thread {
@@ -191,13 +263,13 @@ class SubscriptionManager(private val context: Context) {
                         .putLong("cachedExpiry", expiryAt)
                         .putString("cachedPlanType", planType)
                         .apply()
-                    mainHandler.post { onResult(true, "Activated! Plan: $planType") }
+                    mainHandler.post { onResult(true, "Activated! Plan: $planType", planType) }
                 } else {
                     val message = json.optString("message", "Invalid code")
-                    mainHandler.post { onResult(false, message) }
+                    mainHandler.post { onResult(false, message, null) }
                 }
             } catch (e: Exception) {
-                mainHandler.post { onResult(false, "Check your internet and try again") }
+                mainHandler.post { onResult(false, "Check your internet and try again", null) }
             }
         }.start()
     }

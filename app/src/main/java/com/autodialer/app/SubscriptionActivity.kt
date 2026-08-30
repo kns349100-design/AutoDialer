@@ -34,6 +34,7 @@ class SubscriptionActivity : AppCompatActivity() {
         subscriptionManager = SubscriptionManager(this)
         subscriptionManager.ensureFirstLaunchRecorded()
         subscriptionManager.refreshStatusInBackground()
+        restorePendingPaymentIfAny()
 
         binding.btnFreeTrial.setOnClickListener {
             subscriptionManager.startFreeTrial()
@@ -62,13 +63,17 @@ class SubscriptionActivity : AppCompatActivity() {
             binding.btnRedeem.isEnabled = false
             binding.tvRedeemResult.text = "Checking..."
             startSlowHint(binding.tvRedeemResult, "Still checking - the server can take a few extra seconds, hang on...")
-            subscriptionManager.redeemCode(code) { success, message ->
+            subscriptionManager.redeemCode(code) { success, message, planType ->
                 cancelSlowHint()
                 binding.btnRedeem.isEnabled = true
                 binding.tvRedeemResult.text = message
                 if (success) {
                     refreshUi()
-                    goToMainAfterDelay()
+                    if (!planType.isNullOrBlank()) {
+                        showCongratulationsDialog(planType, null)
+                    } else {
+                        goToMainAfterDelay()
+                    }
                 }
             }
         }
@@ -101,6 +106,10 @@ class SubscriptionActivity : AppCompatActivity() {
         val phone = AuthManager(this).phoneNumber().filter { it.isDigit() }.takeLast(10)
         val reference = "AD-$planType-$phone-${System.currentTimeMillis().toString().takeLast(5)}"
         pendingPlanReference = reference
+        // Persisted immediately (not just kept in memory) so that if Android kills this
+        // screen while the user is off in their UPI app - common on low-RAM phones - coming
+        // back still resumes checking for the payment instead of losing track of it entirely.
+        subscriptionManager.savePendingPayment(planType, amountRupees, paymentStartedAt, reference)
 
         val uri = Uri.parse("upi://pay")
             .buildUpon()
@@ -121,6 +130,27 @@ class SubscriptionActivity : AppCompatActivity() {
         }
     }
 
+    /** Called from onCreate - if a payment was started but never confirmed (the screen got
+     * killed and recreated while waiting, or the app was simply closed and reopened), this
+     * picks it back up automatically instead of silently losing track of it. Without this, a
+     * person could genuinely pay and never get their plan, with no idea why. */
+    private fun restorePendingPaymentIfAny() {
+        val pending = subscriptionManager.loadPendingPayment() ?: return
+        if (subscriptionManager.isSubscribed()) {
+            // Already active by some other means (e.g. redeemed a code meanwhile) - the
+            // pending record has served its purpose.
+            subscriptionManager.clearPendingPayment()
+            return
+        }
+        pendingPlanType = pending.planType
+        pendingAmountRupees = pending.amountRupees
+        paymentStartedAt = pending.startedAt
+        pendingPlanReference = pending.reference
+        binding.tvPaymentResult.text =
+            "Still waiting to confirm your last payment - it unlocks automatically as soon as we see the confirmation, or send a screenshot below."
+        binding.btnCheckPayment.visibility = android.view.View.VISIBLE
+    }
+
     /** Polls the SMS inbox every couple of seconds (while this screen is visible) for a
      * matching bank/UPI credit message. Stops automatically once found, once the user leaves
      * this screen, or if no payment is currently pending. */
@@ -132,17 +162,50 @@ class SubscriptionActivity : AppCompatActivity() {
 
         if (SmsPaymentVerifier.foundMatchingCreditSms(this, paymentStartedAt, pendingAmountRupees)) {
             subscriptionManager.grantPlanLocally(planType)
-            binding.tvPaymentResult.text = "Payment confirmed automatically - plan activated!"
+            subscriptionManager.clearPendingPayment()
             binding.btnCheckPayment.visibility = android.view.View.GONE
             paymentStartedAt = 0L
+            pendingPlanType = null
             refreshUi()
-            goToMainAfterDelay()
+            showCongratulationsDialog(planType, pendingAmountRupees)
             return
         }
 
         val runnable = Runnable { checkForAutoUnlock() }
         smsPollRunnable = runnable
         slowHintHandler.postDelayed(runnable, 3000)
+    }
+
+    /** Clear confirmation of exactly what was bought - plan name, price paid, and the exact
+     * date/time it now runs out - so there's never any ambiguity about what a payment got. */
+    private fun showCongratulationsDialog(planType: String, amountRupees: Int?) {
+        val (planName, priceLabel) = subscriptionManager.planDisplayInfo(planType)
+        val expiryLabel = subscriptionManager.expiryDateLabel()
+
+        val dialogView = layoutInflater.inflate(R.layout.dialog_congrats, null)
+        dialogView.findViewById<android.widget.TextView>(R.id.tvCongratsPlanName).text = planName
+        dialogView.findViewById<android.widget.TextView>(R.id.tvCongratsBadge).text = planType
+        dialogView.findViewById<android.widget.TextView>(R.id.tvCongratsExpiry).text = expiryLabel
+
+        val amountView = dialogView.findViewById<android.widget.TextView>(R.id.tvCongratsAmount)
+        if (amountRupees != null) {
+            amountView.text = "₹$amountRupees paid • $priceLabel"
+            amountView.visibility = android.view.View.VISIBLE
+        } else {
+            amountView.visibility = android.view.View.GONE
+        }
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        dialogView.findViewById<android.widget.TextView>(R.id.btnCongratsStart).setOnClickListener {
+            dialog.dismiss()
+            goToMainAfterDelay(0)
+        }
+        dialog.show()
     }
 
     /** Opens WhatsApp to the admin's number with a pre-filled message including the payment
@@ -163,13 +226,13 @@ class SubscriptionActivity : AppCompatActivity() {
     /** After successfully activating any plan (free trial started, payment verified, or a
      * code redeemed) - go straight into the app instead of leaving the user sitting on the
      * plan screen. Short delay so they can actually see the confirmation message first. */
-    private fun goToMainAfterDelay() {
+    private fun goToMainAfterDelay(delayMs: Long = 1200) {
         slowHintHandler.postDelayed({
             if (!isFinishing && !isDestroyed) {
                 startActivity(android.content.Intent(this, MainActivity::class.java))
                 finish()
             }
-        }, 1200)
+        }, delayMs)
     }
 
     /** Shows a reassuring message if the backend hasn't responded within a few seconds
