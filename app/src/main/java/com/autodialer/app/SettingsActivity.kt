@@ -41,7 +41,7 @@ class SettingsActivity : AppCompatActivity() {
         setupRow(binding.rowDashboard, "📊", "Dashboard", "Call history and outcomes") {
             startActivity(Intent(this, HistoryActivity::class.java))
         }
-        setupRow(binding.rowPlan, "💳", "Plan / Subscription", "Manage your active plan") {
+        setupRow(binding.rowPlan, "💳", "Plan / Subscription", SubscriptionManager(this).planSummaryForSettings()) {
             startActivity(Intent(this, SubscriptionActivity::class.java))
         }
 
@@ -58,6 +58,13 @@ class SettingsActivity : AppCompatActivity() {
         setupRow(binding.rowBattery, "🔋", "Keep App Running", "Stop the phone from closing this app mid-list") {
             requestIgnoreBatteryOptimizations()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Refresh the live plan status every time this screen is shown (not just on first
+        // create) - e.g. after coming back from actually buying/redeeming a plan.
+        binding.rowPlan.rowSubtitle.text = SubscriptionManager(this).planSummaryForSettings()
     }
 
     private fun setupRow(

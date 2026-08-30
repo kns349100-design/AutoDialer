@@ -1,10 +1,12 @@
 package com.autodialer.app
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.autodialer.app.databinding.ActivityHistoryBinding
 import java.text.SimpleDateFormat
@@ -38,13 +40,37 @@ class HistoryActivity : AppCompatActivity() {
             outcomeStore,
             onDelete = { position -> confirmDeleteRow(position) },
             onToggleCollected = { position -> toggleCollected(position) },
-            onCall = { position -> callEntry(position) },
-            onMessage = { position -> messageEntry(position) }
+            onCall = { position -> callFromDashboard(position) }
         )
         binding.rvHistory.layoutManager = LinearLayoutManager(this)
         binding.rvHistory.adapter = adapter
 
         loadToday()
+    }
+
+    /** Places a single, one-off call straight from the Dashboard - completely separate from
+     * the autodialer sequence (doesn't touch the loaded list, its statuses, or the
+     * already-called exclusion list), so there's no risk of this interfering with the main
+     * calling flow. Falls back to opening the dialer (one extra tap) if call permission
+     * somehow isn't granted, rather than silently failing. */
+    private fun callFromDashboard(displayPosition: Int) {
+        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
+        val entry = store.loadDay(store.todayKey()).getOrNull(storageIndex) ?: return
+        val phone = entry.phone
+        if (phone.isBlank()) return
+
+        val hasPermission = ContextCompat.checkSelfPermission(this, android.Manifest.permission.CALL_PHONE) ==
+            PackageManager.PERMISSION_GRANTED
+        val intent = if (hasPermission) {
+            Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
+        } else {
+            Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Could not start a call", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onResume() {
@@ -78,27 +104,6 @@ class HistoryActivity : AppCompatActivity() {
         val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
         store.toggleCollected(store.todayKey(), storageIndex)
         loadToday()
-    }
-
-    /** Opens the phone dialer pre-filled with this row's number (no CALL_PHONE permission needed). */
-    private fun callEntry(displayPosition: Int) {
-        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
-        val entry = store.loadDay(store.todayKey()).getOrNull(storageIndex) ?: return
-        try {
-            startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${entry.phone}")))
-        } catch (e: Exception) {
-        }
-    }
-
-    /** Opens WhatsApp chat with this row's number. */
-    private fun messageEntry(displayPosition: Int) {
-        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
-        val entry = store.loadDay(store.todayKey()).getOrNull(storageIndex) ?: return
-        val digits = entry.phone.filter { it.isDigit() }
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")))
-        } catch (e: Exception) {
-        }
     }
 
     private fun confirmDeleteRow(displayPosition: Int) {

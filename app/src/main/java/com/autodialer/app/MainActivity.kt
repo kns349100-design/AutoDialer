@@ -426,6 +426,45 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             .show()
     }
 
+    /**
+     * Finds every phone-number-shaped token on one line of pasted/typed/imported text, using
+     * the same robust two-pass regex already proven for OCR (see extractPhoneNumbers) - so
+     * paste, file-import, and photo-import all get identical, strong detection instead of
+     * three different (and differently buggy) parsing rules.
+     *
+     * Handles, correctly:
+     *  - "Name, 9876543210" and "9876543210, Name" (name can be on either side)
+     *  - CSV rows with extra columns in any order ("9876543210,Name,email@x.com")
+     *  - A number that itself contains a hyphen ("9075-034748") - previously this got wrongly
+     *    split in half at the hyphen and half the number was silently lost
+     *  - More than one number on the same line - every one is kept, none dropped
+     *  - A line with no name at all - gets an auto label ("Lead 7") so every single lead
+     *    always has a label, never blank
+     */
+    private fun extractLeadsFromLine(line: String, startIndex: Int): List<Lead> {
+        val candidates = extractPhoneNumbers(line).toList()
+        if (candidates.isEmpty()) return emptyList()
+
+        var leftover = line
+        candidates.forEach { leftover = leftover.replace(it, " ") }
+        leftover = leftover.trim(' ', ',', '-', '|', '\t', ':', ';').trim()
+        val label = leftover.split(",").map { it.trim() }.firstOrNull { it.isNotBlank() && it.any { c -> c.isLetter() } }
+
+        return candidates.mapIndexedNotNull { i, token ->
+            val digitsOnly = token.filter { it.isDigit() }
+            // Reject anything that can't possibly be a real phone number (a stray 4-digit
+            // code, a partial OCR fragment, etc) - never load/dial something that isn't
+            // actually a phone number.
+            if (digitsOnly.length !in 10..13) return@mapIndexedNotNull null
+            val finalLabel = when {
+                !label.isNullOrBlank() && candidates.size == 1 -> label
+                !label.isNullOrBlank() -> "$label ${i + 1}"
+                else -> "Lead ${startIndex + i}"
+            }
+            Lead(finalLabel, token)
+        }
+    }
+
     private fun loadNumbersFromInput() {
         if (engine.hasActiveList()) {
             Toast.makeText(
@@ -439,16 +478,15 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         val rawLines = raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
 
         val parsedLeads = mutableListOf<Lead>()
+        val unparsableLines = mutableListOf<String>()
+        var runningIndex = 1
         for (line in rawLines) {
-            val parts = line.split(",", "-").map { it.trim() }
-            val (name, phonePart) = if (parts.size >= 2) {
-                parts[0] to parts.last()
+            val leadsFromLine = extractLeadsFromLine(line, runningIndex)
+            if (leadsFromLine.isEmpty()) {
+                unparsableLines.add(line)
             } else {
-                null to parts[0]
-            }
-            val cleanedPhone = phonePart.replace(Regex("[^0-9+]"), "")
-            if (cleanedPhone.isNotEmpty()) {
-                parsedLeads.add(Lead(name, cleanedPhone))
+                parsedLeads.addAll(leadsFromLine)
+                runningIndex += leadsFromLine.size
             }
         }
 
@@ -470,20 +508,23 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             }
         }
 
-        binding.tvDuplicateInfo.text = if (duplicates.isNotEmpty())
-            "${duplicates.size} duplicate number(s) found and removed." else ""
+        val warnings = mutableListOf<String>()
+        if (duplicates.isNotEmpty()) warnings.add("${duplicates.size} duplicate number(s) found and removed.")
+        if (unparsableLines.isNotEmpty()) warnings.add("${unparsableLines.size} line(s) had no valid phone number and were skipped.")
 
-        val alreadyCalledPhones = callLogStore.calledPhonesWithinDays(60)
+        // Permanent, all-time exclusion: once a number has ever been called through this app
+        // (on any day, in any past list), it can never be loaded into a list again - this is
+        // the hard guarantee that no number gets called twice, not just a recent-days window.
+        val alreadyCalledPhones = callLogStore.allCalledPhones()
         val neverCalled = deduped.filter { !alreadyCalledPhones.contains(PhoneUtils.normalize(it.phone)) }
         val alreadyCalledCount = deduped.size - neverCalled.size
         if (alreadyCalledCount > 0) {
-            val existing = binding.tvDuplicateInfo.text.toString()
-            val warning = "$alreadyCalledCount number(s) called in the last 2 months have been excluded."
-            binding.tvDuplicateInfo.text = if (existing.isEmpty()) warning else "$existing\n$warning"
+            warnings.add("$alreadyCalledCount number(s) already called before (ever) have been excluded.")
         }
+        binding.tvDuplicateInfo.text = warnings.joinToString("\n")
 
         if (neverCalled.isEmpty()) {
-            Toast.makeText(this, "All these numbers were already called in the last 2 months", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "All these numbers have already been called before", Toast.LENGTH_LONG).show()
             return
         }
 

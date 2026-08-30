@@ -12,19 +12,17 @@ class CallLogAdapter(
     private val outcomeStore: OutcomeStore,
     private val onDelete: (Int) -> Unit,
     private val onToggleCollected: (Int) -> Unit,
-    private val onCall: (Int) -> Unit,
-    private val onMessage: (Int) -> Unit
+    private val onCall: (Int) -> Unit
 ) : RecyclerView.Adapter<CallLogAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val index: TextView = view.findViewById(R.id.tvIndex)
+        val time: TextView = view.findViewById(R.id.tvLogTime)
         val name: TextView = view.findViewById(R.id.tvLogName)
         val status: TextView = view.findViewById(R.id.tvLogStatus)
         val outcome: TextView = view.findViewById(R.id.tvLogOutcome)
         val collected: TextView = view.findViewById(R.id.tvCollected)
+        val call: TextView = view.findViewById(R.id.tvCallRow)
         val delete: TextView = view.findViewById(R.id.tvDeleteRow)
-        val call: TextView = view.findViewById(R.id.btnCall)
-        val message: TextView = view.findViewById(R.id.btnMessage)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -34,9 +32,9 @@ class CallLogAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val entry = entries[position]
-        holder.index.text = (position + 1).toString()
+        holder.time.text = entry.time
         holder.name.text = if (entry.name.isNullOrBlank()) entry.phone else "${entry.name} — ${entry.phone}"
-        holder.status.text = "${entry.time} · ${entry.status}"
+        holder.status.text = entry.status
 
         val tag = outcomeStore.findById(entry.outcome)
         if (tag != null) {
@@ -66,18 +64,17 @@ class CallLogAdapter(
                 holder.collected.text = "Mark Collected"
                 val bg = GradientDrawable()
                 bg.cornerRadius = 40f
-                bg.setColor(android.graphics.Color.parseColor("#EEF1FC"))
+                bg.setColor(android.graphics.Color.parseColor("#2C2C2A"))
                 holder.collected.background = bg
-                holder.collected.setTextColor(android.graphics.Color.parseColor("#8083A3"))
+                holder.collected.setTextColor(android.graphics.Color.parseColor("#B4B2A9"))
             }
             holder.collected.setOnClickListener { onToggleCollected(position) }
         } else {
             holder.collected.visibility = View.GONE
         }
 
-        holder.delete.setOnClickListener { onDelete(position) }
         holder.call.setOnClickListener { onCall(position) }
-        holder.message.setOnClickListener { onMessage(position) }
+        holder.delete.setOnClickListener { onDelete(position) }
     }
 
     override fun getItemCount(): Int = entries.size

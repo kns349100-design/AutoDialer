@@ -1,23 +1,26 @@
 package com.autodialer.app
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.autodialer.app.databinding.ActivityCallLogBinding
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class CallLogActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityCallLogBinding
     private lateinit var store: CallLogStore
-    private lateinit var logAdapter: CallLogAdapter
-    private lateinit var sheetsAdapter: SheetSummaryAdapter
+    private lateinit var adapter: CallLogAdapter
     private var days: List<String> = emptyList()
     private var selectedDay: String? = null
 
@@ -45,63 +48,68 @@ class CallLogActivity : AppCompatActivity() {
 
         store = CallLogStore(this)
 
-        sheetsAdapter = SheetSummaryAdapter(emptyList()) { summary -> openSheet(summary.dayKey) }
-        binding.rvSheets.layoutManager = LinearLayoutManager(this)
-        binding.rvSheets.adapter = sheetsAdapter
-
-        logAdapter = CallLogAdapter(
+        adapter = CallLogAdapter(
             mutableListOf(),
             OutcomeStore(this),
             onDelete = { position -> confirmDeleteRow(position) },
             onToggleCollected = { position -> toggleCollected(position) },
-            onCall = { position -> callEntry(position) },
-            onMessage = { position -> messageEntry(position) }
+            onCall = { position -> callFromSheet(position) }
         )
         binding.rvCallLog.layoutManager = LinearLayoutManager(this)
-        binding.rvCallLog.adapter = logAdapter
+        binding.rvCallLog.adapter = adapter
 
-        binding.btnBack.setOnClickListener { onBackPress() }
         binding.btnDeleteSheet.setOnClickListener { confirmDeleteSheet() }
         binding.btnExportCsv.setOnClickListener { exportCurrentDayCsv() }
 
-        loadAllSheets()
+        loadDays()
     }
 
-    /** Back button: from the detail view it returns to the All Sheets list; from the list it exits. */
-    private fun onBackPress() {
-        if (binding.containerDetail.visibility == View.VISIBLE) {
-            showAllSheetsView()
+    /** Places a single, one-off call for a number sitting in a past day's sheet - completely
+     * separate from the autodialer, doesn't touch any list or the already-called exclusion. */
+    private fun callFromSheet(displayPosition: Int) {
+        val day = selectedDay ?: return
+        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
+        val entry = store.loadDay(day).getOrNull(storageIndex) ?: return
+        val phone = entry.phone
+        if (phone.isBlank()) return
+
+        val hasPermission = ContextCompat.checkSelfPermission(this, android.Manifest.permission.CALL_PHONE) ==
+            PackageManager.PERMISSION_GRANTED
+        val intent = if (hasPermission) {
+            Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
         } else {
-            finish()
+            Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not start a call", Toast.LENGTH_SHORT).show()
         }
     }
 
-    /** STATE 1: builds the "All Sheets" list, one card per past date. */
-    private fun loadAllSheets() {
+    private fun loadDays() {
         // Today's calls live in the Dashboard (still in progress) - Sheets only holds
         // finished, past days, neatly organized one sheet per date.
         days = store.getDays().filter { it != store.todayKey() }.sortedDescending()
+        if (days.isEmpty()) {
+            binding.tvDaySummary.text = "No past sheets yet - today's calls are on the Dashboard"
+            binding.rvCallLog.visibility = android.view.View.GONE
+            binding.tvEmptyState.visibility = android.view.View.VISIBLE
+            binding.spinnerDay.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("(no past sheets)"))
+            return
+        }
 
-        val summaries = days.map { day -> SheetSummary(day, formatSheetName(day), store.loadDay(day).size) }
-        sheetsAdapter.setItems(summaries)
-
-        binding.rvSheets.visibility = if (days.isEmpty()) View.GONE else View.VISIBLE
-        binding.tvNoSheets.visibility = if (days.isEmpty()) View.VISIBLE else View.GONE
-
-        showAllSheetsView()
-    }
-
-    private fun showAllSheetsView() {
-        binding.tvScreenTitle.text = "All Sheets"
-        binding.containerAllSheets.visibility = View.VISIBLE
-        binding.containerDetail.visibility = View.GONE
-    }
-
-    private fun openSheet(day: String) {
-        selectedDay = day
-        binding.tvScreenTitle.text = formatSheetName(day)
-        binding.containerAllSheets.visibility = View.GONE
-        binding.containerDetail.visibility = View.VISIBLE
+        val labels = days.map { formatSheetName(it) }
+        val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        binding.spinnerDay.adapter = spinnerAdapter
+        binding.spinnerDay.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                selectedDay = days.getOrNull(position)
+                loadEntriesForSelectedDay()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        selectedDay = days.first()
         loadEntriesForSelectedDay()
     }
 
@@ -125,11 +133,11 @@ class CallLogActivity : AppCompatActivity() {
         val sorted = indexed.sortedWith(compareBy({ outcomePriority(it.value.outcome) }, { it.value.time }))
 
         displayToStorageIndex = sorted.map { it.index }
-        logAdapter.setEntries(sorted.map { it.value })
+        adapter.setEntries(sorted.map { it.value })
 
-        binding.tvDaySummary.text = "${rawEntries.size} calls"
-        binding.rvCallLog.visibility = if (rawEntries.isEmpty()) View.GONE else View.VISIBLE
-        binding.tvEmptyState.visibility = if (rawEntries.isEmpty()) View.VISIBLE else View.GONE
+        binding.tvDaySummary.text = "${rawEntries.size} calls on ${formatSheetName(day)}"
+        binding.rvCallLog.visibility = if (rawEntries.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+        binding.tvEmptyState.visibility = if (rawEntries.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     private fun toggleCollected(displayPosition: Int) {
@@ -137,31 +145,6 @@ class CallLogActivity : AppCompatActivity() {
         val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
         store.toggleCollected(day, storageIndex)
         loadEntriesForSelectedDay()
-    }
-
-    /** Opens the phone dialer pre-filled with this row's number (no CALL_PHONE permission needed). */
-    private fun callEntry(displayPosition: Int) {
-        val day = selectedDay ?: return
-        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
-        val entry = store.loadDay(day).getOrNull(storageIndex) ?: return
-        try {
-            startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${entry.phone}")))
-        } catch (e: Exception) {
-            Toast.makeText(this, "Couldn't open dialer", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    /** Opens WhatsApp chat with this row's number. */
-    private fun messageEntry(displayPosition: Int) {
-        val day = selectedDay ?: return
-        val storageIndex = displayToStorageIndex.getOrNull(displayPosition) ?: return
-        val entry = store.loadDay(day).getOrNull(storageIndex) ?: return
-        val digits = entry.phone.filter { it.isDigit() }
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")))
-        } catch (e: Exception) {
-            Toast.makeText(this, "Couldn't open WhatsApp", Toast.LENGTH_SHORT).show()
-        }
     }
 
     private fun exportCurrentDayCsv() {
@@ -186,12 +169,12 @@ class CallLogActivity : AppCompatActivity() {
             val uri = androidx.core.content.FileProvider.getUriForFile(
                 this, "$packageName.fileprovider", file
             )
-            val intent = Intent(Intent.ACTION_SEND).apply {
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "text/csv"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(intent, "Share call log"))
+            startActivity(android.content.Intent.createChooser(intent, "Share call log"))
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -220,7 +203,7 @@ class CallLogActivity : AppCompatActivity() {
             .setPositiveButton("Delete Sheet") { _, _ ->
                 store.deleteDay(day)
                 Toast.makeText(this, "Sheet deleted", Toast.LENGTH_SHORT).show()
-                loadAllSheets()
+                loadDays()
             }
             .setNegativeButton("Cancel", null)
             .show()

@@ -96,6 +96,34 @@ class SubscriptionManager(private val context: Context) {
         else -> "No active plan"
     }
 
+    /** How much time is left on whichever is currently active (paid plan or free trial), in
+     * plain words - e.g. "12 days 4h left", "23h 15m left", "45m left". Empty string if
+     * nothing is active. */
+    fun remainingTimeLabel(): String {
+        val millisLeft = when {
+            isSubscribed() -> (cachedExpiry() - System.currentTimeMillis()).coerceAtLeast(0)
+            isTrialActive() -> trialMillisRemaining()
+            else -> return ""
+        }
+        val totalMinutes = millisLeft / 60000
+        val days = totalMinutes / (24 * 60)
+        val hours = (totalMinutes % (24 * 60)) / 60
+        val minutes = totalMinutes % 60
+        return when {
+            days > 0 -> "$days day${if (days > 1L) "s" else ""} ${hours}h left"
+            hours > 0 -> "${hours}h ${minutes}m left"
+            else -> "${minutes}m left"
+        }
+    }
+
+    /** One-line summary combining plan name + remaining time, used on the Settings screen's
+     * "Plan / Subscription" row so it's visible without even opening that screen. */
+    fun planSummaryForSettings(): String = when {
+        isSubscribed() -> "${cachedPlanType()} — ${remainingTimeLabel()}"
+        isTrialActive() -> "Free trial — ${remainingTimeLabel()}"
+        else -> "No active plan - tap to choose one"
+    }
+
     /** Call this on app start / resume when internet may be available. Silently no-ops if offline, URL not configured, or checked very recently (throttled to reduce background network load / perceived slowness). */
     fun refreshStatusInBackground() {
         if (SCRIPT_URL.startsWith("PASTE_")) return

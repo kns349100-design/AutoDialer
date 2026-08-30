@@ -3,141 +3,98 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/pricing_bg"
-    android:padding="20dp">
+    android:background="@color/bg_dark"
+    android:padding="16dp">
 
-    <!-- Top bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/bg_hero_gradient"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Call Sheets"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Day-wise call records"
+            android:textColor="#D8CCF5"
+            android:textSize="12sp"/>
+    </LinearLayout>
+
+    <Spinner
+        android:id="@+id/spinnerDay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"/>
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingBottom="8dp">
-
-        <TextView
-            android:id="@+id/btnBack"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="@drawable/bg_pricing_icon_chip"
-            android:gravity="center"
-            android:text="←"
-            android:textColor="@color/pricing_text_dark"
-            android:textSize="18sp"/>
-
-        <TextView
-            android:id="@+id/tvScreenTitle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="All Sheets"
-            android:textColor="@color/pricing_text_dark"
-            android:textSize="17sp"
-            android:textStyle="bold"/>
-
-        <View
-            android:layout_width="40dp"
-            android:layout_height="40dp"/>
-    </LinearLayout>
-
-    <!-- STATE 1: All Sheets list (one card per date) -->
-    <LinearLayout
-        android:id="@+id/containerAllSheets"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical"
         android:layout_marginTop="10dp">
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rvSheets"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"/>
+        <TextView
+            android:id="@+id/tvDaySummary"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:textColor="@color/text_secondary_dark"
+            android:textSize="12sp"
+            android:text="0 calls"/>
 
         <TextView
-            android:id="@+id/tvNoSheets"
-            android:layout_width="match_parent"
+            android:id="@+id/btnDeleteSheet"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:gravity="center"
-            android:padding="24dp"
-            android:textColor="@color/pricing_text_gray"
-            android:visibility="gone"
-            android:text="No past sheets yet - today's calls are on the Dashboard"/>
+            android:background="@drawable/bg_pill_no"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:textColor="@color/no_text"
+            android:textSize="11sp"
+            android:text="Delete This Sheet"/>
 
+        <TextView
+            android:id="@+id/btnExportCsv"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_pill_resume"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:textColor="@color/resume_text"
+            android:textSize="11sp"
+            android:text="Export CSV"/>
     </LinearLayout>
 
-    <!-- STATE 2: One sheet's contacts (shown after tapping a card above) -->
-    <LinearLayout
-        android:id="@+id/containerDetail"
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvCallLog"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="vertical"
-        android:visibility="gone">
+        android:layout_marginTop="12dp"/>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="10dp"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/tvDaySummary"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:textColor="@color/pricing_text_gray"
-                android:textSize="12sp"
-                android:text="0 calls"/>
-
-            <TextView
-                android:id="@+id/btnDeleteSheet"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_pricing_btn_outline"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:textColor="@color/pricing_text_dark"
-                android:textSize="11sp"
-                android:text="Delete Sheet"/>
-
-            <TextView
-                android:id="@+id/btnExportCsv"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_pricing_icon_chip"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:textColor="@color/pricing_blue"
-                android:textSize="11sp"
-                android:text="Export CSV"/>
-        </LinearLayout>
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rvCallLog"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="12dp"/>
-
-        <TextView
-            android:id="@+id/tvEmptyState"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:padding="24dp"
-            android:textColor="@color/pricing_text_gray"
-            android:visibility="gone"
-            android:text="No call logs for this day"/>
-
-    </LinearLayout>
+    <TextView
+        android:id="@+id/tvEmptyState"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:padding="24dp"
+        android:textColor="@color/text_muted_dark"
+        android:visibility="gone"
+        android:text="No call logs for this day"/>
 
 </LinearLayout>

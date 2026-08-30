@@ -217,7 +217,7 @@ class SubscriptionActivity : AppCompatActivity() {
     private fun refreshUi() {
         binding.tvPlanStatus.text = subscriptionManager.currentPlanLabel()
         binding.tvTrialInfo.text = when {
-            subscriptionManager.isSubscribed() -> "Your plan is active"
+            subscriptionManager.isSubscribed() -> "Plan active — ${subscriptionManager.remainingTimeLabel()}"
             subscriptionManager.isTrialActive() -> {
                 val hoursLeft = subscriptionManager.trialMillisRemaining() / (1000 * 60 * 60)
                 "${hoursLeft}h left in trial"
