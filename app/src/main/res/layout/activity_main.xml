@@ -48,9 +48,9 @@
                     android:layout_width="42dp"
                     android:layout_height="42dp"
                     android:layout_marginStart="8dp"
-                    android:background="@drawable/bg_pill_load_idle"
+                    android:background="@drawable/bg_neon_download"
                     android:gravity="center"
-                    android:textColor="@color/resume_text"
+                    android:textColor="@color/text_primary_dark"
                     android:textSize="17sp"
                     android:text="⬇"/>
             </LinearLayout>
@@ -70,7 +70,7 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:gravity="center"
-                    android:background="@drawable/bg_card"
+                    android:background="@drawable/bg_neon_import_card"
                     android:padding="18dp">
                     <TextView
                         android:layout_width="wrap_content"
@@ -94,7 +94,7 @@
                     android:orientation="vertical"
                     android:gravity="center"
                     android:layout_marginStart="10dp"
-                    android:background="@drawable/bg_card"
+                    android:background="@drawable/bg_neon_import_card"
                     android:padding="18dp">
                     <TextView
                         android:layout_width="wrap_content"
@@ -118,7 +118,7 @@
                     android:orientation="vertical"
                     android:gravity="center"
                     android:layout_marginStart="10dp"
-                    android:background="@drawable/bg_card"
+                    android:background="@drawable/bg_neon_import_card"
                     android:padding="18dp">
                     <TextView
                         android:layout_width="wrap_content"
@@ -180,26 +180,69 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
+                <!-- Decorative divider matching the reference design: dot—line—label—line—dot -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:layout_width="8dp"
+                        android:layout_height="8dp"
+                        android:background="@drawable/bg_neon_dot"/>
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:background="@color/neon_green"/>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_marginEnd="10dp"
+                        android:text="Paste number here"
+                        android:textColor="@color/neon_green"
+                        android:textStyle="bold"
+                        android:textSize="14sp"/>
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:background="@color/neon_green"/>
+
+                    <View
+                        android:layout_width="8dp"
+                        android:layout_height="8dp"
+                        android:background="@drawable/bg_neon_dot"/>
+                </LinearLayout>
+
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:text="Paste numbers here (one per line). Optional name: Rahul, 9876543210"
+                    android:layout_marginTop="10dp"
+                    android:text="One per line. Optional name: Rahul, 9876543210"
                     android:textColor="@color/text_muted_dark"
                     android:textSize="12sp"/>
 
                 <EditText
                     android:id="@+id/etNumbers"
                     android:layout_width="match_parent"
-                    android:layout_height="120dp"
+                    android:layout_height="160dp"
                     android:gravity="top|start"
                     android:hint="9876543210&#10;Rahul, 9123456780&#10;..."
                     android:inputType="textMultiLine"
-                    android:background="@drawable/bg_card"
+                    android:background="@drawable/bg_neon_input"
                     android:textColor="@color/text_primary_dark"
                     android:textColorHint="@color/text_muted_dark"
-                    android:padding="12dp"
-                    android:layout_marginTop="6dp"/>
+                    android:padding="14dp"
+                    android:layout_marginTop="10dp"/>
 
                 <TextView
                     android:id="@+id/tvDuplicateInfo"

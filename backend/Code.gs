@@ -21,8 +21,10 @@
  *    except to set Revoked = TRUE on a row to cut off one device/branch)
  *
  * Tab "Users" (row 1 = headers) - for phone number + PIN login
- *   Phone | PinHash | ActiveDeviceId | UpdatedAt | FailedAttempts | LockedUntil
- *   (filled automatically by the script - don't edit rows manually)
+ *   Phone | PinHash | ActiveDeviceId | UpdatedAt | FailedAttempts | LockedUntil | TrialUsed | TrialStartedAt
+ *   (filled automatically by the script - don't edit rows manually. TrialUsed/TrialStartedAt
+ *    track the one-time 24-hour free trial per phone number, so it can never be repeated by
+ *    uninstalling and reinstalling the app.)
  *
  * ---- Reliability notes for anyone maintaining this file ----
  * - Every request that reads-then-writes a sheet takes a script lock first
@@ -46,6 +48,7 @@ function doGet(e) {
     if (action === 'login') return handleLogin(e);
     if (action === 'resetPin') return handleResetPin(e);
     if (action === 'checkSession') return handleCheckSession(e);
+    if (action === 'startTrial') return handleStartTrial(e);
     return jsonResponse({ status: 'error', message: 'unknown action' });
   } catch (err) {
     // Never let a raw exception escape - the app can only understand JSON.
@@ -481,4 +484,46 @@ function handleCheckSession(e) {
 
   var activeDeviceId = sheet.getRange(rowNum, 3).getValue();
   return jsonResponse({ status: 'ok', active: String(activeDeviceId) === deviceId });
+}
+
+/**
+ * Grants the one-time 24-hour free trial for a phone number - checked and recorded here on
+ * the server (Users sheet columns G/H: TrialUsed, TrialStartedAt), NOT just on the phone
+ * itself. A purely on-device trial flag gets wiped the instant someone uninstalls and
+ * reinstalls the app, letting the same phone number claim endless "free 24 hours" - keying it
+ * to the phone number's row on the server instead closes that off completely, since the
+ * phone number (and its login) is what survives a reinstall, not anything stored locally.
+ * Locked so two rapid taps (or two devices) can never both start a trial for the same number.
+ */
+function handleStartTrial(e) {
+  var phone = cleanInput(e.parameter.phone, 20);
+  var deviceId = cleanInput(e.parameter.deviceId, 200);
+  if (!phone || !deviceId) {
+    return jsonResponse({ status: 'error', message: 'missing params' });
+  }
+
+  return withLock(function () {
+    var sheet = getUsersSheet();
+    var rowNum = findUserRow(sheet, phone);
+    var now = Date.now();
+
+    if (rowNum === -1) {
+      // Shouldn't normally happen (logging in already creates this row) - create a minimal
+      // row so the trial is still correctly tracked against this phone number.
+      sheet.appendRow([safeCell(phone), '', safeCell(deviceId), now, 0, 0, true, now]);
+      return jsonResponse({ status: 'ok', startedAt: now });
+    }
+
+    // getRange width 8 to also read TrialUsed/TrialStartedAt (older rows created before these
+    // columns existed simply read as blank/0, which correctly means "trial not used yet").
+    var row = sheet.getRange(rowNum, 1, 1, 8).getValues()[0];
+    var trialUsed = row[6] === true || String(row[6]).toUpperCase() === 'TRUE';
+    if (trialUsed) {
+      var usedAt = Number(row[7]) || now;
+      return jsonResponse({ status: 'error', message: 'Free trial already used on this account', startedAt: usedAt });
+    }
+
+    sheet.getRange(rowNum, 7, 1, 2).setValues([[true, now]]);
+    return jsonResponse({ status: 'ok', startedAt: now });
+  });
 }

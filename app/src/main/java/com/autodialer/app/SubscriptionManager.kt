@@ -65,10 +65,42 @@ class SubscriptionManager(private val context: Context) {
 
     /** Starts the 24-hour free trial right now. No-ops if already started before (never
      * extends/restarts it). */
-    fun startFreeTrial() {
-        if (!prefs.contains("trialStartedAt")) {
-            prefs.edit().putLong("trialStartedAt", System.currentTimeMillis()).apply()
+    /** Starts the 24-hour free trial - but only if this PHONE NUMBER has genuinely never used
+     * one before, checked with the backend (never just locally). A purely on-device flag would
+     * get wiped the instant the app is uninstalled and reinstalled, letting the same phone
+     * number claim endless "free 24 hours" - this closes that off, since the check is against
+     * the phone number's row on the server, which survives a reinstall even though the app's
+     * local storage doesn't.
+     */
+    fun startFreeTrial(phone: String, onResult: (success: Boolean, message: String) -> Unit) {
+        if (SCRIPT_URL.startsWith("PASTE_")) {
+            onResult(false, "Backend URL is not set - follow backend/SETUP.md")
+            return
         }
+        Thread {
+            try {
+                val url = "$SCRIPT_URL?action=startTrial" +
+                    "&phone=${URLEncoder.encode(phone, "UTF-8")}" +
+                    "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
+                val response = httpGet(url)
+                val json = JSONObject(response)
+                val startedAt = json.optLong("startedAt", 0L)
+                if (startedAt > 0L) {
+                    // Synced locally either way - a fresh grant, or confirmation it was
+                    // already used (possibly on a previous install of the app) - so the app's
+                    // own trial state always matches the server's true history for this number.
+                    prefs.edit().putLong("trialStartedAt", startedAt).apply()
+                }
+                if (json.optString("status") == "ok") {
+                    mainHandler.post { onResult(true, "Free trial started!") }
+                } else {
+                    val message = json.optString("message", "Free trial already used on this account")
+                    mainHandler.post { onResult(false, message) }
+                }
+            } catch (e: Exception) {
+                mainHandler.post { onResult(false, "Check your internet and try again") }
+            }
+        }.start()
     }
 
     private fun trialStartedAt(): Long = prefs.getLong("trialStartedAt", 0L)
@@ -190,7 +222,11 @@ class SubscriptionManager(private val context: Context) {
     /** The exact date/time the current plan (or trial) runs out, e.g. "12 Sep 2026, 6:40 PM" -
      * shown on the congratulations screen so it's unambiguous exactly what was bought. */
     fun expiryDateLabel(): String {
-        val expiry = if (isSubscribed()) cachedExpiry() else trialStartedAt() + TRIAL_DURATION_MS
+        val expiry = when {
+            isSubscribed() -> cachedExpiry()
+            isTrialActive() -> trialStartedAt() + TRIAL_DURATION_MS
+            else -> System.currentTimeMillis() // defensive fallback - should never be hit in practice
+        }
         val fmt = java.text.SimpleDateFormat("d MMM yyyy, h:mm a", java.util.Locale.getDefault())
         return fmt.format(java.util.Date(expiry))
     }

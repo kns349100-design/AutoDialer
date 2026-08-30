@@ -43,5 +43,13 @@
     <color name="pricing_text_gray">#8083A3</color>
     <color name="pricing_blue">#3D6BFF</color>
     <color name="pricing_icon_chip">#EEF1FC</color>
+
+    <!-- Violet-neon accents - used ONLY on the Main screen's header/import-card area to
+         match the requested "AutoDialer" reference look, kept separate so nothing else in
+         the app's existing dark theme is affected. -->
+    <color name="neon_purple">#A855F7</color>
+    <color name="neon_purple_soft">#2D1B4E</color>
+    <color name="neon_card_bg">#160F26</color>
+    <color name="neon_green">#22D3AA</color>
 </resources>
 

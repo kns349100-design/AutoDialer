@@ -37,9 +37,14 @@ class SubscriptionActivity : AppCompatActivity() {
         restorePendingPaymentIfAny()
 
         binding.btnFreeTrial.setOnClickListener {
-            subscriptionManager.startFreeTrial()
-            Toast.makeText(this, "Free trial started - 24 hours", Toast.LENGTH_SHORT).show()
-            goToMainAfterDelay()
+            binding.btnFreeTrial.isEnabled = false
+            val phone = AuthManager(this).phoneNumber()
+            subscriptionManager.startFreeTrial(phone) { success, message ->
+                binding.btnFreeTrial.isEnabled = true
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                refreshUi()
+                if (success) goToMainAfterDelay()
+            }
         }
         binding.btnPay12Hour.setOnClickListener {
             startUpiPayment("HOURLY12", 10, "12 Hour Access")
