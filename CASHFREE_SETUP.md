@@ -1,5 +1,11 @@
 # Cashfree Payment Setup (real in-app payment, no coupon codes needed)
 
+> ⚠️ **Ab ye approach use nahi ho rahi.** App abhi **direct UPI payment + automatic SMS
+> verification** use karta hai (koi Cashfree, browser, ya whitelisting nahi chahiye) - dekho
+> `SubscriptionActivity.kt` / `SubscriptionManager.kt` / `SmsPaymentVerifier.kt`. Ye file sirf
+> reference ke liye rakhi hai agar kabhi future me wapas ek proper payment gateway (card/
+> netbanking support ke saath) chahiye ho.
+
 Isse users "Pay" button dabate hi Cashfree ka Standard Checkout (official hosted payment) page
 khulega, wahan UPI/card/netbanking se pay karenge, "I've Paid" dabate hi automatic unlock ho
 jayega.

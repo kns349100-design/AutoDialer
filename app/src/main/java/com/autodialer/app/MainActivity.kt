@@ -333,11 +333,11 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
      * numbers slip through before.
      */
     private fun extractPhoneNumbers(text: String): Set<String> {
-        val results = linkedSetOf<String>()
+        val raw = linkedSetOf<String>()
 
         // Pass 1: clean, unbroken digit runs.
         Regex("\\d{10,13}").findAll(text).forEach { match ->
-            results.add(match.value)
+            raw.add(match.value)
         }
 
         // Pass 2: numbers with spacing/punctuation mixed in (e.g. "+91 90750-34748",
@@ -347,8 +347,21 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             val cleaned = match.value.replace(Regex("[\\s\\-.()]"), "")
             val digitsOnly = cleaned.replace("+", "")
             if (digitsOnly.length in 10..13 && digitsOnly.all { it.isDigit() }) {
-                results.add(cleaned)
+                raw.add(cleaned)
             }
+        }
+
+        // A number written as "+91 9876543210" gets matched by BOTH passes above as two
+        // different-looking strings ("9876543210" from pass 1, "+919876543210" from pass 2) -
+        // without this step they'd be treated as two separate numbers (double-loading the same
+        // person) until a later, unrelated duplicate check happened to catch it. Collapsing by
+        // the actual normalized number here means the same real number is only ever reported
+        // once, however it was written.
+        val seenNormalized = mutableSetOf<String>()
+        val results = linkedSetOf<String>()
+        for (candidate in raw) {
+            val normalized = PhoneUtils.normalize(candidate)
+            if (seenNormalized.add(normalized)) results.add(candidate)
         }
 
         return results

@@ -122,7 +122,13 @@ class SubscriptionActivity : AppCompatActivity() {
             .appendQueryParameter("pn", SubscriptionManager.UPI_PAYEE_NAME)
             .appendQueryParameter("am", amountRupees.toString())
             .appendQueryParameter("cu", "INR")
-            .appendQueryParameter("tn", "AutoDialer $planLabel $reference")
+            // "tr" is the official NPCI UPI-deeplink transaction-reference field - some UPI
+            // apps (notably newer Google Pay versions) treat a request missing it as
+            // incomplete/untrusted and show a generic info panel instead of the normal Pay
+            // confirmation screen. Keeping the note itself short for the same reason - very
+            // long notes have been seen to trigger the same fallback behaviour on some apps.
+            .appendQueryParameter("tr", reference.replace("-", "").take(35))
+            .appendQueryParameter("tn", "AutoDialer $planLabel")
             .build()
 
         try {
