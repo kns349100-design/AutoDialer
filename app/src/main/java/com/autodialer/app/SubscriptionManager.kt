@@ -28,6 +28,9 @@ class SubscriptionManager(private val context: Context) {
         // TODO: replace with your deployed Apps Script Web App URL
         const val SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyHEnFWqibZeO774YRKcdlyWb_EgOWyFAi8gmiFDkbajNZQo5TiIL18yOdLp3g1KY9v/exec"
 
+        /** Netlify site that creates Razorpay orders (secret key lives only on the server). */
+        const val API_BASE = "https://callconnect-app.netlify.app"
+
         const val TRIAL_DURATION_MS = 24L * 60 * 60 * 1000 // 1 day
 
         /** UPI ID payments go to directly (no gateway, no whitelisting delay - money lands
@@ -375,6 +378,89 @@ class SubscriptionManager(private val context: Context) {
                 mainHandler.post { onResult(false, "Could not check payment - try again") }
             }
         }.start()
+    }
+
+
+    data class RazorpayOrder(val orderId: String, val amountPaise: Int, val keyId: String, val planLabel: String)
+
+    private fun planToApiId(planType: String): String = when (planType) {
+        "HOURLY12" -> "starter"
+        "YEARLY" -> "yearly"
+        else -> "monthly"
+    }
+
+    /** Asks the website backend to create a Razorpay order for the plan (the price is decided
+     * on the server, not by the app). Calls back on the main thread. */
+    fun createRazorpayOrder(planType: String, onResult: (order: RazorpayOrder?, message: String) -> Unit) {
+        Thread {
+            try {
+                val body = JSONObject().put("plan", planToApiId(planType)).toString()
+                val json = JSONObject(httpPost("$API_BASE/api/create-order", body))
+                if (json.has("order_id")) {
+                    val order = RazorpayOrder(
+                        json.getString("order_id"),
+                        json.getInt("amount"),
+                        json.getString("key_id"),
+                        json.optString("plan_label", "")
+                    )
+                    mainHandler.post { onResult(order, "") }
+                } else {
+                    val message = json.optString("error", "Could not start payment")
+                    mainHandler.post { onResult(null, message) }
+                }
+            } catch (e: Exception) {
+                mainHandler.post { onResult(null, "Check your internet and try again") }
+            }
+        }.start()
+    }
+
+    /** Asks the license backend to confirm (directly with Razorpay) that this order is paid, and
+     * activates the plan on this device. Safe to call repeatedly - the server never grants the
+     * same order twice. */
+    fun confirmRazorpayPayment(orderId: String, onResult: (success: Boolean, planType: String?, message: String) -> Unit) {
+        if (SCRIPT_URL.startsWith("PASTE_")) {
+            onResult(false, null, "Backend URL is not set - follow backend/SETUP.md")
+            return
+        }
+        Thread {
+            try {
+                val url = "$SCRIPT_URL?action=razorpayVerify" +
+                    "&orderId=${URLEncoder.encode(orderId, "UTF-8")}" +
+                    "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
+                val json = JSONObject(httpGet(url))
+                if (json.optString("status") == "ok") {
+                    val expiryAt = json.optLong("expiryAt", 0L)
+                    val type = json.optString("planType", "")
+                    prefs.edit()
+                        .putLong("cachedExpiry", expiryAt)
+                        .putString("cachedPlanType", type)
+                        .apply()
+                    mainHandler.post { onResult(true, type, "") }
+                } else {
+                    val message = json.optString("message", "Payment not confirmed yet")
+                    mainHandler.post { onResult(false, null, message) }
+                }
+            } catch (e: Exception) {
+                mainHandler.post { onResult(false, null, "Could not confirm payment - check your internet") }
+            }
+        }.start()
+    }
+
+    private fun httpPost(urlString: String, jsonBody: String): String {
+        val conn = URL(urlString).openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.doOutput = true
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
+        try {
+            conn.outputStream.use { it.write(jsonBody.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            return stream?.bufferedReader()?.use { it.readText() } ?: "{\"error\":\"Empty response (HTTP $code)\"}"
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private fun httpGet(urlString: String): String {

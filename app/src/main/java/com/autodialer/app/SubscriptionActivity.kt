@@ -1,30 +1,30 @@
 package com.autodialer.app
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import com.autodialer.app.databinding.ActivitySubscriptionBinding
+import com.razorpay.Checkout
+import com.razorpay.PaymentData
+import com.razorpay.PaymentResultWithDataListener
+import org.json.JSONObject
 
-class SubscriptionActivity : AppCompatActivity() {
+class SubscriptionActivity : AppCompatActivity(), PaymentResultWithDataListener {
 
     private lateinit var binding: ActivitySubscriptionBinding
     private lateinit var subscriptionManager: SubscriptionManager
     private var pendingPlanType: String? = null
-    private var pendingPlanReference: String? = null
+    private var pendingOrderId: String? = null
     private var pendingAmountRupees: Int = 0
-    private var paymentStartedAt: Long = 0L
+    private var lastPaymentId: String? = null
+    private var checkoutOpen = false
+    private var confirming = false
     private val slowHintHandler = Handler(Looper.getMainLooper())
     private var slowHintRunnable: Runnable? = null
-    private var smsPollRunnable: Runnable? = null
-    private val SMS_PERMISSION_REQUEST = 501
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,6 +34,7 @@ class SubscriptionActivity : AppCompatActivity() {
         subscriptionManager = SubscriptionManager(this)
         subscriptionManager.ensureFirstLaunchRecorded()
         subscriptionManager.refreshStatusInBackground()
+        Checkout.preload(applicationContext)
         restorePendingPaymentIfAny()
 
         binding.btnFreeTrial.setOnClickListener {
@@ -47,13 +48,13 @@ class SubscriptionActivity : AppCompatActivity() {
             }
         }
         binding.btnPay12Hour.setOnClickListener {
-            startUpiPayment("HOURLY12", 10, "12 Hour Access")
+            startRazorpayPayment("HOURLY12", 10, "12 Hour Access")
         }
         binding.btnPayMonthly.setOnClickListener {
-            startUpiPayment("MONTHLY", 300, "1 Month Access")
+            startRazorpayPayment("MONTHLY", 300, "1 Month Access")
         }
         binding.btnPayYearly.setOnClickListener {
-            startUpiPayment("YEARLY", 1000, "1 Year Access")
+            startRazorpayPayment("YEARLY", 1000, "1 Year Access")
         }
         binding.btnCheckPayment.setOnClickListener {
             sendPaymentProofOnWhatsApp()
@@ -84,107 +85,131 @@ class SubscriptionActivity : AppCompatActivity() {
         }
 
         refreshUi()
-        requestSmsPermissionIfNeeded()
-    }
-
-    private fun requestSmsPermissionIfNeeded() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.READ_SMS), SMS_PERMISSION_REQUEST)
-        }
     }
 
     /**
-     * Opens the user's UPI app (PhonePe/GPay/Paytm/etc) with the amount and a unique
-     * reference note pre-filled, so payment happens instantly on the same phone - no
-     * payment gateway, no browser, no whitelisting delay. As soon as the user comes back to
-     * this screen, checkForAutoUnlock() starts looking for a matching bank/UPI credit SMS and
-     * unlocks automatically the moment one arrives - no manual step needed. If no matching SMS
-     * shows up (permission denied, unusual bank SMS format, delayed SMS), the WhatsApp
-     * screenshot + redeem-code button further down stays available as a fallback.
+     * Creates a Razorpay order on the server, then opens Razorpay Checkout inside the app. On a
+     * phone it lists the installed UPI apps (PhonePe / GPay / Paytm...) to pay with directly -
+     * no QR code. Once paid, the license backend asks Razorpay itself whether the order is
+     * really paid before activating the plan.
      */
-    private fun startUpiPayment(planType: String, amountRupees: Int, planLabel: String) {
-        pendingPlanType = planType
-        pendingAmountRupees = amountRupees
-        paymentStartedAt = System.currentTimeMillis()
-        val phone = AuthManager(this).phoneNumber().filter { it.isDigit() }.takeLast(10)
-        val reference = "AD-$planType-$phone-${System.currentTimeMillis().toString().takeLast(5)}"
-        pendingPlanReference = reference
-        // Persisted immediately (not just kept in memory) so that if Android kills this
-        // screen while the user is off in their UPI app - common on low-RAM phones - coming
-        // back still resumes checking for the payment instead of losing track of it entirely.
-        subscriptionManager.savePendingPayment(planType, amountRupees, paymentStartedAt, reference)
-
-        val uri = Uri.parse("upi://pay")
-            .buildUpon()
-            .appendQueryParameter("pa", SubscriptionManager.UPI_VPA)
-            .appendQueryParameter("pn", SubscriptionManager.UPI_PAYEE_NAME)
-            .appendQueryParameter("am", amountRupees.toString())
-            .appendQueryParameter("cu", "INR")
-            // "tr" is the official NPCI UPI-deeplink transaction-reference field - some UPI
-            // apps (notably newer Google Pay versions) treat a request missing it as
-            // incomplete/untrusted and show a generic info panel instead of the normal Pay
-            // confirmation screen. Keeping the note itself short for the same reason - very
-            // long notes have been seen to trigger the same fallback behaviour on some apps.
-            .appendQueryParameter("tr", reference.replace("-", "").take(35))
-            .appendQueryParameter("tn", "AutoDialer $planLabel")
-            .build()
-
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, uri))
-            binding.tvPaymentResult.text =
-                "Complete the payment, then come back here - it unlocks automatically as soon as we see the payment confirmation."
-            binding.btnCheckPayment.visibility = android.view.View.VISIBLE
-        } catch (e: Exception) {
-            Toast.makeText(this, "No UPI app found on this phone (install PhonePe/GPay/Paytm)", Toast.LENGTH_LONG).show()
+    private fun startRazorpayPayment(planType: String, amountRupees: Int, planLabel: String) {
+        if (checkoutOpen || confirming) return
+        setPayButtonsEnabled(false)
+        binding.tvPaymentResult.text = "Starting secure payment..."
+        subscriptionManager.createRazorpayOrder(planType) { order, message ->
+            if (order == null) {
+                setPayButtonsEnabled(true)
+                binding.tvPaymentResult.text = message
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                return@createRazorpayOrder
+            }
+            pendingPlanType = planType
+            pendingAmountRupees = amountRupees
+            pendingOrderId = order.orderId
+            lastPaymentId = null
+            // Persisted immediately so that if Android kills this screen while the user is in
+            // their UPI app, coming back still finds and confirms the payment.
+            subscriptionManager.savePendingPayment(planType, amountRupees, System.currentTimeMillis(), order.orderId)
+            openCheckout(order, planLabel)
         }
     }
 
-    /** Called from onCreate - if a payment was started but never confirmed (the screen got
-     * killed and recreated while waiting, or the app was simply closed and reopened), this
-     * picks it back up automatically instead of silently losing track of it. Without this, a
-     * person could genuinely pay and never get their plan, with no idea why. */
+    private fun openCheckout(order: SubscriptionManager.RazorpayOrder, planLabel: String) {
+        try {
+            val checkout = Checkout()
+            checkout.setKeyID(order.keyId)
+            val phone = AuthManager(this).phoneNumber().filter { it.isDigit() }.takeLast(10)
+            val options = JSONObject()
+            options.put("name", "CallConnect")
+            options.put("description", planLabel)
+            options.put("order_id", order.orderId)
+            options.put("currency", "INR")
+            options.put("amount", order.amountPaise)
+            if (phone.length == 10) {
+                options.put("prefill", JSONObject().put("contact", phone))
+            }
+            options.put("theme", JSONObject().put("color", "#1A56DB"))
+            checkoutOpen = true
+            binding.tvPaymentResult.text = "Complete the payment in the payment screen."
+            binding.btnCheckPayment.visibility = android.view.View.VISIBLE
+            checkout.open(this, options)
+        } catch (e: Exception) {
+            checkoutOpen = false
+            setPayButtonsEnabled(true)
+            Toast.makeText(this, "Could not open payment screen", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: PaymentData?) {
+        checkoutOpen = false
+        lastPaymentId = razorpayPaymentId
+        confirmPendingPayment(quiet = false)
+    }
+
+    override fun onPaymentError(code: Int, response: String?, paymentData: PaymentData?) {
+        checkoutOpen = false
+        setPayButtonsEnabled(true)
+        binding.tvPaymentResult.text = "Payment cancelled or failed. If money was deducted, it will be confirmed automatically - or use the WhatsApp button below."
+        binding.btnCheckPayment.visibility = android.view.View.VISIBLE
+    }
+
+    /** Asks the backend to confirm the pending order with Razorpay and activates the plan.
+     * quiet = true is used for silent recovery when the screen is reopened - it never shows an
+     * error for an order that simply was never paid. Safe to repeat: the server grants an order
+     * only once. */
+    private fun confirmPendingPayment(quiet: Boolean) {
+        val orderId = pendingOrderId ?: return
+        if (confirming) return
+        confirming = true
+        if (!quiet) {
+            binding.tvPaymentResult.text = "Confirming your payment..."
+            startSlowHint(binding.tvPaymentResult, "Still confirming - the server can take a few extra seconds, hang on...")
+        }
+        subscriptionManager.confirmRazorpayPayment(orderId) { success, planType, message ->
+            confirming = false
+            cancelSlowHint()
+            setPayButtonsEnabled(true)
+            if (success && !planType.isNullOrBlank()) {
+                val amount = if (pendingAmountRupees > 0) pendingAmountRupees else null
+                subscriptionManager.clearPendingPayment()
+                pendingOrderId = null
+                pendingPlanType = null
+                binding.btnCheckPayment.visibility = android.view.View.GONE
+                binding.tvPaymentResult.text = "Payment confirmed!"
+                refreshUi()
+                showCongratulationsDialog(planType, amount)
+            } else {
+                binding.tvPaymentResult.text = if (quiet) {
+                    "Last payment not confirmed yet. If money was deducted, it activates automatically - or use the WhatsApp button below."
+                } else {
+                    "$message\nIf money was deducted, it will activate automatically - or use the WhatsApp button below."
+                }
+                binding.btnCheckPayment.visibility = android.view.View.VISIBLE
+            }
+        }
+    }
+
+    private fun setPayButtonsEnabled(enabled: Boolean) {
+        binding.btnPay12Hour.isEnabled = enabled
+        binding.btnPayMonthly.isEnabled = enabled
+        binding.btnPayYearly.isEnabled = enabled
+    }
+
+    /** If a payment was started but never confirmed (screen killed while in the UPI app, or the
+     * app was closed and reopened), pick it back up instead of silently losing track of it. */
     private fun restorePendingPaymentIfAny() {
         val pending = subscriptionManager.loadPendingPayment() ?: return
-        if (subscriptionManager.isSubscribed()) {
-            // Already active by some other means (e.g. redeemed a code meanwhile) - the
-            // pending record has served its purpose.
+        if (!pending.reference.startsWith("order_")) {
+            // Leftover from the old UPI/SMS flow - not a Razorpay order, nothing to confirm.
             subscriptionManager.clearPendingPayment()
             return
         }
         pendingPlanType = pending.planType
         pendingAmountRupees = pending.amountRupees
-        paymentStartedAt = pending.startedAt
-        pendingPlanReference = pending.reference
-        binding.tvPaymentResult.text =
-            "Still waiting to confirm your last payment - it unlocks automatically as soon as we see the confirmation, or send a screenshot below."
+        pendingOrderId = pending.reference
+        binding.tvPaymentResult.text = "Checking your last payment..."
         binding.btnCheckPayment.visibility = android.view.View.VISIBLE
-    }
-
-    /** Polls the SMS inbox every couple of seconds (while this screen is visible) for a
-     * matching bank/UPI credit message. Stops automatically once found, once the user leaves
-     * this screen, or if no payment is currently pending. */
-    private fun checkForAutoUnlock() {
-        smsPollRunnable?.let { slowHintHandler.removeCallbacks(it) }
-        val planType = pendingPlanType ?: return
-        if (paymentStartedAt == 0L) return
-        if (subscriptionManager.isSubscribed()) return
-
-        if (SmsPaymentVerifier.foundMatchingCreditSms(this, paymentStartedAt, pendingAmountRupees)) {
-            subscriptionManager.grantPlanLocally(planType)
-            subscriptionManager.clearPendingPayment()
-            binding.btnCheckPayment.visibility = android.view.View.GONE
-            paymentStartedAt = 0L
-            pendingPlanType = null
-            refreshUi()
-            showCongratulationsDialog(planType, pendingAmountRupees)
-            return
-        }
-
-        val runnable = Runnable { checkForAutoUnlock() }
-        smsPollRunnable = runnable
-        slowHintHandler.postDelayed(runnable, 3000)
     }
 
     /** Clear confirmation of exactly what was bought - plan name, price paid, and the exact
@@ -219,16 +244,14 @@ class SubscriptionActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    /** Opens WhatsApp to the admin's number with a pre-filled message including the payment
-     * reference, so the user only needs to attach the screenshot and hit Send. */
+    /** Opens WhatsApp to the admin's number with the payment/order IDs pre-filled, so a
+     * payment that didn't auto-activate can be sorted out quickly. */
     private fun sendPaymentProofOnWhatsApp() {
-        val reference = pendingPlanReference ?: ""
-        val message = "Hi, I've paid for AutoDialer. Reference: $reference. Sending payment screenshot now - please activate my code."
+        val message = "Hi, I've paid for CallConnect. Order: ${pendingOrderId ?: "-"}, Payment: ${lastPaymentId ?: "-"}. Please activate my plan."
         val encodedMessage = java.net.URLEncoder.encode(message, "UTF-8")
         val uri = Uri.parse("https://wa.me/919075034748?text=$encodedMessage")
-        val intent = Intent(Intent.ACTION_VIEW, uri)
         try {
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
         } catch (e: Exception) {
             Toast.makeText(this, "WhatsApp not found", Toast.LENGTH_SHORT).show()
         }
@@ -263,29 +286,14 @@ class SubscriptionActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshUi()
-        checkForAutoUnlock()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        smsPollRunnable?.let { slowHintHandler.removeCallbacks(it) }
+        if (!checkoutOpen && !confirming && pendingOrderId != null) {
+            confirmPendingPayment(quiet = true)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         cancelSlowHint()
-        smsPollRunnable?.let { slowHintHandler.removeCallbacks(it) }
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == SMS_PERMISSION_REQUEST) {
-            checkForAutoUnlock()
-        }
     }
 
     private fun refreshUi() {
