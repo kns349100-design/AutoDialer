@@ -45,6 +45,7 @@ function doGet(e) {
     if (action === 'check') return handleCheck(e);
     if (action === 'createPaymentLink') return handleCreatePaymentLink(e);
     if (action === 'checkPayment') return handleCheckPayment(e);
+    if (action === 'razorpayVerify') return handleRazorpayVerify(e);
     if (action === 'login') return handleLogin(e);
     if (action === 'resetPin') return handleResetPin(e);
     if (action === 'checkSession') return handleCheckSession(e);
@@ -263,6 +264,88 @@ function handleCheckPayment(e) {
 
     actSheet.appendRow([safeCell(deviceId), safeCell(orderId), now, expiryAt, planType, false]);
 
+    return jsonResponse({ status: 'ok', expiryAt: expiryAt, planType: planType });
+  });
+}
+
+
+/**
+ * ---- Razorpay (in-app payment via Razorpay Android SDK) ----
+ * Script Properties needed: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET (Project Settings -> Script Properties).
+ * The secret never goes into the app. The app only sends the Razorpay order id; this asks
+ * Razorpay's own servers whether that order is really paid, so a fake request can't unlock a plan.
+ * The plan is decided from the amount Razorpay says was paid (never from anything the app sends).
+ */
+var RAZORPAY_AMOUNT_TO_PLAN = { 1000: 'HOURLY12', 30000: 'MONTHLY', 100000: 'YEARLY' }; // paise
+
+function handleRazorpayVerify(e) {
+  var orderId = cleanInput(e.parameter.orderId, 100);
+  var deviceId = cleanInput(e.parameter.deviceId, 200);
+  if (!orderId || !deviceId || !/^order_[A-Za-z0-9]+$/.test(orderId)) {
+    return jsonResponse({ status: 'error', message: 'missing params' });
+  }
+  var props = PropertiesService.getScriptProperties();
+  var keyId = props.getProperty('RAZORPAY_KEY_ID');
+  var keySecret = props.getProperty('RAZORPAY_KEY_SECRET');
+  if (!keyId || !keySecret) {
+    return jsonResponse({ status: 'error', message: 'Payment server is not configured' });
+  }
+
+  return withLock(function () {
+    var actSheet = getSheet('Activations');
+    var rows = actSheet.getDataRange().getValues();
+
+    // Idempotency: the same paid order can never grant time twice.
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][1]) === orderId) {
+        if (String(rows[i][0]).trim() !== deviceId) {
+          return jsonResponse({ status: 'error', message: 'Ye payment kisi aur device par activate ho chuka hai' });
+        }
+        return jsonResponse({ status: 'ok', expiryAt: Number(rows[i][3]), planType: rows[i][4] });
+      }
+    }
+
+    var response;
+    try {
+      response = UrlFetchApp.fetch('https://api.razorpay.com/v1/orders/' + encodeURIComponent(orderId), {
+        headers: { Authorization: 'Basic ' + Utilities.base64Encode(keyId + ':' + keySecret) },
+        muteHttpExceptions: true
+      });
+    } catch (err) {
+      return jsonResponse({ status: 'error', message: 'Razorpay se contact nahi ho paya' });
+    }
+
+    var order;
+    try {
+      order = JSON.parse(response.getContentText());
+    } catch (err) {
+      return jsonResponse({ status: 'error', message: 'Razorpay se galat response mila' });
+    }
+    if (response.getResponseCode() !== 200 || !order || order.id !== orderId) {
+      return jsonResponse({ status: 'error', message: 'Order nahi mila' });
+    }
+    if (order.status !== 'paid' || Number(order.amount_paid) < Number(order.amount)) {
+      return jsonResponse({ status: 'error', message: 'Payment abhi complete nahi hua (status: ' + (order.status || 'unknown') + ')' });
+    }
+    var planType = RAZORPAY_AMOUNT_TO_PLAN[Number(order.amount)];
+    if (!planType || order.currency !== 'INR') {
+      return jsonResponse({ status: 'error', message: 'Payment amount kisi plan se match nahi karta' });
+    }
+
+    // Money-safety: extend from whichever is later - now or this device's current expiry -
+    // so a payment can only ever ADD time, never replace/shorten what's already paid for.
+    var now = Date.now();
+    var base = now;
+    for (var j = 1; j < rows.length; j++) {
+      if (String(rows[j][0]).trim() !== deviceId) continue;
+      var revoked = rows[j][5];
+      if (revoked === true || String(revoked).toUpperCase() === 'TRUE') continue;
+      if (String(rows[j][4]).toUpperCase() === 'FREE') continue;
+      var exp = Number(rows[j][3]) || 0;
+      if (exp > base) base = exp;
+    }
+    var expiryAt = grantExpiry(planType, base);
+    actSheet.appendRow([safeCell(deviceId), safeCell(orderId), now, expiryAt, planType, false]);
     return jsonResponse({ status: 'ok', expiryAt: expiryAt, planType: planType });
   });
 }
