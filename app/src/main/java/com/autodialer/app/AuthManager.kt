@@ -95,7 +95,7 @@ class AuthManager(private val context: Context) {
     }
 
     /** Checks whether this device is still the active session for the logged-in phone number.
-     * Throttled to at most once every 3 minutes - this hits the (slow, free) backend, so
+     * Throttled to at most once a minute - this hits the (slow, free) backend, so
      * calling it on every single onResume made the app feel sluggish overall for no benefit. */
     fun checkSessionInBackground(onLoggedOutElsewhere: () -> Unit) {
         if (SubscriptionManager.SCRIPT_URL.startsWith("PASTE_")) return
@@ -103,7 +103,7 @@ class AuthManager(private val context: Context) {
         if (phone.isEmpty()) return
         val now = System.currentTimeMillis()
         val lastChecked = prefs.getLong("lastSessionCheck", 0L)
-        if (now - lastChecked < 3 * 60 * 1000) return
+        if (now - lastChecked < 60 * 1000) return
         prefs.edit().putLong("lastSessionCheck", now).apply()
         Thread {
             try {
