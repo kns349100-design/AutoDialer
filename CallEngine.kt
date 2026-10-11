@@ -11,7 +11,8 @@ import android.telephony.TelephonyManager
 interface CallEngineListener {
     fun onLeadUpdated(index: Int, status: CallSequencer.Status)
     fun onDialing(index: Int, lead: Lead)
-    fun onWaitingForNext(seconds: Int)
+    fun onCallEndedAwaitingOutcome(index: Int)
+    fun onBatchComplete(callsDone: Int)
     fun onSessionPaused()
     fun onSessionResumed()
     fun onSessionStopped()
@@ -23,6 +24,7 @@ interface CallEngineListener {
 class CallEngine(
     private val activity: Activity,
     private val sessionStore: SessionStore,
+    private val callLogStore: CallLogStore,
     private val listener: CallEngineListener
 ) {
     var leads: MutableList<Lead> = mutableListOf()
@@ -30,13 +32,38 @@ class CallEngine(
 
     private var sequencer: CallSequencer? = null
     private var sessionName: String = "Untitled Session"
-    var delaySeconds: Int = 2
+
+    /** 0 = unlimited (dial the whole list without stopping). */
+    var batchTarget: Int = 0
+    private var callsDialedThisBatch = 0
+
+    /** Index of the lead whose call just ended and is waiting for the user to tag an outcome. */
+    private var pendingOutcomeIndex: Int? = null
+
+    /** The call-log row created the instant a number is dialed, so it counts as "called" even if no outcome ever gets tagged (app closed, crash, Stop pressed, etc). */
+    private var pendingLogDate: String? = null
+    private var pendingLogIndex: Int? = null
+
+    /** True right after the app sent the user to WhatsApp for the INFO outcome and is waiting
+     * for them to return before dialing the next number. See markAwaitingWhatsAppReturn(). */
+    private var awaitingWhatsAppReturn = false
+
+    fun isAwaitingWhatsAppReturn(): Boolean = awaitingWhatsAppReturn
+
+    /** Called the instant WhatsApp is opened for the INFO outcome, before the outcome itself
+     * is actually recorded. Persisted immediately so that even if Android kills the app while
+     * WhatsApp is on screen, the app knows on its own - without the user having to redo
+     * anything on WhatsApp - to finish tagging this outcome and dial the next number the
+     * moment it's back in the foreground. */
+    fun markAwaitingWhatsAppReturn() {
+        awaitingWhatsAppReturn = true
+        persist()
+    }
 
     private val telephonyManager =
         activity.getSystemService(Activity.TELEPHONY_SERVICE) as TelephonyManager
     private val handler = Handler(Looper.getMainLooper())
 
-    // Guards against duplicate OFFHOOK->IDLE transitions being reported twice by Android.
     private var wasOffHook = false
     private var listenerRegistered = false
 
@@ -44,9 +71,7 @@ class CallEngine(
         override fun onCallStateChanged(state: Int, phoneNumber: String?) {
             super.onCallStateChanged(state, phoneNumber)
             when (state) {
-                TelephonyManager.CALL_STATE_OFFHOOK -> {
-                    wasOffHook = true
-                }
+                TelephonyManager.CALL_STATE_OFFHOOK -> wasOffHook = true
                 TelephonyManager.CALL_STATE_IDLE -> {
                     if (wasOffHook) {
                         wasOffHook = false
@@ -64,22 +89,42 @@ class CallEngine(
         persist()
     }
 
-    /** Restores a previously saved (interrupted) session WITHOUT auto-dialing anything. */
     fun restoreIfAvailable(): Boolean {
         val saved = sessionStore.load() ?: return false
         leads = saved.leads.toMutableList()
         sessionName = saved.sessionName
-        delaySeconds = saved.delaySeconds
+        batchTarget = saved.batchTarget
         sequencer = CallSequencer(leads.size)
-        // Replay statuses into the sequencer so counts/UI are correct.
+
+        // Carry over whatever dial-time log reference was last saved - this is what lets us
+        // correctly ask for that number's outcome below instead of ever silently re-dialing it.
+        pendingLogDate = saved.pendingLogDate
+        pendingLogIndex = if (saved.pendingLogIndex >= 0) saved.pendingLogIndex else null
+        awaitingWhatsAppReturn = saved.awaitingWhatsAppReturn
+
+        var recoveredPendingOutcome: Int? = null
         for (i in leads.indices) {
             if (leads[i].status == CallSequencer.Status.CALLING) {
-                // We can't safely know if that call is still active after a restart.
-                // Mark it back to PENDING rather than guessing - never auto-dial on uncertainty.
-                leads[i].status = CallSequencer.Status.PENDING
+                // A call was actually placed to this number before the app closed/died (this
+                // happens on every call, since dialing switches away to the Phone app - if
+                // Android kills this app in the background during that call, we land here).
+                // We must NEVER silently re-dial it - treat it exactly like a call that just
+                // ended and is waiting for its outcome to be tagged.
+                leads[i].status = CallSequencer.Status.COMPLETED
+                recoveredPendingOutcome = i
             }
             sequencer!!.statuses[i] = leads[i].status
         }
+
+        // Restore any outcome that was still waiting to be tagged when the app was
+        // stopped/closed last time, so the user gets asked for it again before anything
+        // else can be dialed - it must never get silently skipped.
+        pendingOutcomeIndex = when {
+            saved.pendingOutcomeIndex >= 0 && saved.pendingOutcomeIndex in leads.indices -> saved.pendingOutcomeIndex
+            recoveredPendingOutcome != null -> recoveredPendingOutcome
+            else -> null
+        }
+
         listener.onLog("Session restored: $sessionName (auto-dial NOT triggered)")
         return true
     }
@@ -98,68 +143,148 @@ class CallEngine(
         }
     }
 
+    /** Source-of-truth check used right before a list is ever cleared: true ONLY when every
+     * single lead genuinely has a final status. This is checked directly against `leads`
+     * (never just the sequencer's own internal flags), so a list can never be wiped or marked
+     * "complete" while a number in it is still waiting to be called - even if some other bug
+     * in the sequencer's bookkeeping exists. */
+    private fun allLeadsFinal(): Boolean =
+        leads.isNotEmpty() && leads.all {
+            it.status == CallSequencer.Status.COMPLETED || it.status == CallSequencer.Status.SKIPPED
+        }
+
+    private fun firstPendingIndex(): Int? =
+        leads.indices.firstOrNull { leads[it].status == CallSequencer.Status.PENDING }
+
+    /** Whenever the sequencer believes there's nothing left to dial, this double-checks
+     * against the real lead list before actually finishing. If they disagree - a pending
+     * number is still sitting there - the list is NEVER discarded; instead the sequencer is
+     * self-healed to resume exactly at that number and dialing continues normally. */
+    private fun finishOrResync() {
+        if (allLeadsFinal()) {
+            finishSession()
+            return
+        }
+        val pendingIndex = firstPendingIndex()
+        if (pendingIndex == null) {
+            finishSession()
+            return
+        }
+        listener.onLog("Safety check: sequencer said the list was done but a pending number remained - resuming it instead of losing the list")
+        val resumed = sequencer?.forceCallingAt(pendingIndex)
+        if (resumed != null) {
+            dial(resumed)
+        } else {
+            finishSession()
+        }
+    }
+
+    /** Used for both the very first start AND continuing after a batch limit / manual pause. */
     fun start() {
-        val seq = sequencer ?: return
-        if (leads.isEmpty()) {
-            listener.onEngineError("List khali hai")
+        val seq = sequencer
+        if (seq == null || leads.isEmpty()) {
+            listener.onEngineError("List is empty")
+            return
+        }
+        // A previous call is still waiting for an outcome tag (Resume/Positive/etc) - this can
+        // happen if Stop was pressed, or the app was closed/killed, right after a call ended.
+        // Never dial the next number until that one is tagged.
+        if (pendingOutcomeIndex != null) {
+            registerListener()
+            listener.onCallEndedAwaitingOutcome(pendingOutcomeIndex!!)
             return
         }
         registerListener()
-        val index = seq.start()
+        callsDialedThisBatch = 0
+        val index = if (seq.currentIndex == -1) seq.start() else seq.continueSequence()
         if (index != null) {
             dial(index)
-        } else {
-            listener.onSessionComplete()
+        } else if (seq.isComplete()) {
+            finishOrResync()
         }
     }
 
     fun pause() {
         sequencer?.pause()
-        handler.removeCallbacksAndMessages(null)
         listener.onSessionPaused()
         persist()
     }
 
-    fun resume() {
-        val seq = sequencer ?: return
-        val index = seq.resume()
-        listener.onSessionResumed()
-        if (index != null) {
-            dial(index)
-        }
-        persist()
-    }
+    fun resume() = start()
 
     fun stop() {
         sequencer?.stop()
         handler.removeCallbacksAndMessages(null)
         unregisterListener()
+        // Deliberately NOT clearing pendingOutcomeIndex here: if a call ended and its outcome
+        // hasn't been tagged yet, Stop must not lose that. The next Start (even after the app
+        // was fully closed) will ask for that outcome again before dialing anything else.
         listener.onSessionStopped()
         persist()
     }
 
     fun skip() {
         val seq = sequencer ?: return
-        val index = seq.skip()
-        val skippedIndex = seq.currentIndex // best-effort for UI refresh of the skipped row
-        listener.onLog("Skip requested")
-        if (index != null) {
-            dial(index)
-        } else {
-            // Refresh UI for whichever row got marked SKIPPED even if we didn't dial next.
-            for (i in leads.indices) {
-                if (seq.statuses[i] == CallSequencer.Status.SKIPPED && leads[i].status != CallSequencer.Status.SKIPPED) {
-                    leads[i].status = CallSequencer.Status.SKIPPED
-                    listener.onLeadUpdated(i, CallSequencer.Status.SKIPPED)
-                }
+        val index = seq.currentIndex
+        val leadForLog = if (index in leads.indices) leads[index] else null
+        val result = seq.skip()
+        for (i in leads.indices) {
+            if (seq.statuses[i] == CallSequencer.Status.SKIPPED && leads[i].status != CallSequencer.Status.SKIPPED) {
+                leads[i].status = CallSequencer.Status.SKIPPED
+                listener.onLeadUpdated(i, CallSequencer.Status.SKIPPED)
             }
         }
+        if (leadForLog != null) {
+            val date = pendingLogDate
+            val logIndex = pendingLogIndex
+            if (date != null && logIndex != null) {
+                callLogStore.updateEntry(date, logIndex, "Skipped", null)
+            } else {
+                callLogStore.addEntry(
+                    callLogStore.todayKey(),
+                    CallLogEntry(callLogStore.nowTime(), leadForLog.name, leadForLog.phone, "Skipped", null)
+                )
+            }
+        }
+        pendingLogDate = null
+        pendingLogIndex = null
+        if (result != null) dial(result)
         persist()
     }
 
     private fun dial(index: Int) {
         if (index !in leads.indices) return
         val lead = leads[index]
+
+        // Final safety net, right at the moment of dialing: never call the same number twice.
+        // Catches anything that could slip past the load-time dedup - e.g. the same number in
+        // two different formats, or any other edge case - so a double call is never possible.
+        val normalized = PhoneUtils.normalize(lead.phone)
+        // Status is checked first so the (comparatively slow) number normalising only runs for
+        // numbers that were actually finished - keeps dialing instant even on a very long list.
+        val duplicateWithinThisList = leads.withIndex().any { (i, other) ->
+            i != index &&
+                (other.status == CallSequencer.Status.COMPLETED || other.status == CallSequencer.Status.SKIPPED) &&
+                PhoneUtils.normalize(other.phone) == normalized
+        }
+        if (duplicateWithinThisList || callLogStore.calledToday(normalized)) {
+            listener.onLog("Skipping ${lead.phone} - already called, preventing a double call")
+            leads[index].status = CallSequencer.Status.SKIPPED
+            listener.onLeadUpdated(index, CallSequencer.Status.SKIPPED)
+            callLogStore.addEntry(
+                callLogStore.todayKey(),
+                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Skipped", null, "Auto-skipped: already called - duplicate")
+            )
+            persist()
+            val next = sequencer?.autoSkipCurrentAndAdvance()
+            if (next != null) {
+                dial(next)
+            } else if (sequencer?.isComplete() == true) {
+                finishOrResync()
+            }
+            return
+        }
+
         leads[index].status = CallSequencer.Status.CALLING
         listener.onLeadUpdated(index, CallSequencer.Status.CALLING)
         listener.onDialing(index, lead)
@@ -175,40 +300,140 @@ class CallEngine(
         intent.data = Uri.parse("tel:${lead.phone}")
         try {
             activity.startActivity(intent)
-        } catch (e: SecurityException) {
-            listener.onEngineError("Call permission missing")
+            callsDialedThisBatch += 1
+            // Log the number as "called" right now, at dial time - not after an outcome is
+            // picked. This is what keeps it out of future lists even if the outcome never
+            // gets tagged (app closed mid-call, Stop pressed, crash, etc).
+            val date = callLogStore.todayKey()
+            val logIndex = callLogStore.addEntry(
+                date,
+                CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Dialed", null)
+            )
+            pendingLogDate = date
+            pendingLogIndex = logIndex
+            // Saved immediately - not just at Stop/Skip - so if Android kills the app in the
+            // background during this very call (normal, since dialing switches to the Phone
+            // app), the next restore knows a call was actually placed here.
+            persist()
+        } catch (e: Exception) {
+            // Nothing was actually dialed (permission missing, no phone app, etc) - put the
+            // number back to Pending so it is never wrongly treated as already called.
+            leads[index].status = CallSequencer.Status.PENDING
+            sequencer?.statuses?.set(index, CallSequencer.Status.PENDING)
+            listener.onLeadUpdated(index, CallSequencer.Status.PENDING)
+            listener.onEngineError(if (e is SecurityException) "Call permission missing" else "Could not place the call")
             stop()
         }
     }
 
     private fun handleCallEnded() {
         val seq = sequencer ?: return
-        val ended = seq.onCallEnded() // returns false automatically on duplicate events
+        val ended = seq.onCallEnded()
         if (!ended) {
             listener.onLog("Duplicate call-state event ignored")
             return
         }
-        val endedIndex = seq.let { s -> leads.indices.firstOrNull { s.statuses[it] == CallSequencer.Status.COMPLETED && leads[it].status != CallSequencer.Status.COMPLETED } }
+        val endedIndex = leads.indices.firstOrNull {
+            seq.statuses[it] == CallSequencer.Status.COMPLETED && leads[it].status != CallSequencer.Status.COMPLETED
+        }
         if (endedIndex != null) {
             leads[endedIndex].status = CallSequencer.Status.COMPLETED
             listener.onLeadUpdated(endedIndex, CallSequencer.Status.COMPLETED)
+            pendingOutcomeIndex = endedIndex
         }
         persist()
 
-        if (seq.paused || seq.stopped) {
+        if (seq.paused || seq.stopped) return
+
+        // Wait for the user to tap one of the 4 outcome boxes - no timer here.
+        if (endedIndex != null) {
+            listener.onCallEndedAwaitingOutcome(endedIndex)
+        }
+    }
+
+    /** The lead currently awaiting an outcome tag (call just ended, box still on screen). */
+    fun pendingLead(): Lead? {
+        val index = pendingOutcomeIndex ?: return null
+        return leads.getOrNull(index)
+    }
+
+    /** Called the instant the user taps one of the outcome boxes. Dials the next number immediately. */
+    fun selectOutcome(outcomeId: String) {
+        val seq = sequencer ?: return
+        val index = pendingOutcomeIndex ?: return
+        if (index in leads.indices) {
+            leads[index].outcome = outcomeId
+            listener.onLeadUpdated(index, leads[index].status)
+            val date = pendingLogDate
+            val logIndex = pendingLogIndex
+            if (date != null && logIndex != null) {
+                callLogStore.updateEntry(date, logIndex, "Completed", outcomeId)
+            } else {
+                val lead = leads[index]
+                callLogStore.addEntry(
+                    callLogStore.todayKey(),
+                    CallLogEntry(callLogStore.nowTime(), lead.name, lead.phone, "Completed", outcomeId)
+                )
+            }
+        }
+        pendingOutcomeIndex = null
+        pendingLogDate = null
+        pendingLogIndex = null
+        awaitingWhatsAppReturn = false
+        persist()
+
+        if (batchTarget > 0 && callsDialedThisBatch >= batchTarget) {
+            seq.pause()
+            unregisterListener()
+            listener.onBatchComplete(callsDialedThisBatch)
             return
         }
 
-        listener.onWaitingForNext(delaySeconds)
-        handler.postDelayed({
-            val nextIndex = seq.advance()
-            if (nextIndex != null) {
-                dial(nextIndex)
-            } else {
-                unregisterListener()
-                listener.onSessionComplete()
-            }
-        }, delaySeconds * 1000L)
+        val next = seq.advance()
+        if (next != null) {
+            dial(next)
+        } else {
+            finishOrResync()
+        }
+    }
+
+    /** True while there's a loaded list that isn't fully finished yet (still has numbers to
+     * call, or a call is waiting for its outcome to be tagged). Used to stop a new list from
+     * being loaded on top of one that's still in progress, and to know when to show
+     * "Remove Current List". */
+    fun hasActiveList(): Boolean {
+        if (leads.isEmpty()) return false
+        if (pendingOutcomeIndex != null) return true
+        return leads.any { it.status == CallSequencer.Status.PENDING || it.status == CallSequencer.Status.CALLING }
+    }
+
+    /** Discards the currently loaded list entirely (user doesn't want these numbers anymore).
+     * Numbers already dialed stay correctly recorded in the call log/sheet either way. */
+    fun removeCurrentList() {
+        unregisterListener()
+        handler.removeCallbacksAndMessages(null)
+        leads = mutableListOf()
+        sequencer = null
+        pendingOutcomeIndex = null
+        pendingLogDate = null
+        pendingLogIndex = null
+        awaitingWhatsAppReturn = false
+        sessionStore.clear()
+    }
+
+    /** Called once every number in the list has a final status (Completed/Skipped). Clears the
+     * list automatically - it has already been logged number-by-number in the call log/sheet
+     * as each call happened, so nothing is lost. */
+    private fun finishSession() {
+        unregisterListener()
+        leads = mutableListOf()
+        sequencer = null
+        pendingOutcomeIndex = null
+        pendingLogDate = null
+        pendingLogIndex = null
+        awaitingWhatsAppReturn = false
+        sessionStore.clear()
+        listener.onSessionComplete()
     }
 
     fun persist() {
@@ -218,7 +443,12 @@ class CallEngine(
                 sessionName = sessionName,
                 leads = leads,
                 currentIndex = seq.currentIndex,
-                delaySeconds = delaySeconds
+                delaySeconds = 0,
+                batchTarget = batchTarget,
+                pendingOutcomeIndex = pendingOutcomeIndex ?: -1,
+                pendingLogDate = pendingLogDate,
+                pendingLogIndex = pendingLogIndex ?: -1,
+                awaitingWhatsAppReturn = awaitingWhatsAppReturn
             )
         )
     }
