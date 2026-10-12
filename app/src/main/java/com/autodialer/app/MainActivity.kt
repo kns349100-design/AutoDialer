@@ -37,6 +37,17 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     // dialed only once they actually come back to the app (onResume), i.e. after tapping Send.
     private var pendingInfoOutcome = false
 
+    // The paste box is mirrored into durable storage, but only once typing/pasting has paused
+    // for half a second (and always when the screen leaves the foreground) - saving the whole
+    // text on every single keystroke made pasting/typing a long list laggy.
+    private val draftHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val draftSaveRunnable = Runnable { saveDraftNow() }
+
+    private fun saveDraftNow() {
+        if (!::binding.isInitialized || !::numberDraftStore.isInitialized) return
+        numberDraftStore.setDraft(binding.etNumbers.text.toString())
+    }
+
     // Optional cap on how many calls to dial in one batch. Set via Settings > Batch Limit.
     // 0 = unlimited (dial the whole list).
     private var batchTargetPref = 0
@@ -145,7 +156,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                 // Always mirror the box into durable storage - this is what survives the app
                 // being killed while an image/file picker is open, and what late-arriving OCR
                 // results are checked against so nothing silently disappears.
-                numberDraftStore.setDraft(s?.toString() ?: "")
+                draftHandler.removeCallbacks(draftSaveRunnable)
+                draftHandler.postDelayed(draftSaveRunnable, 500)
             }
         })
 
@@ -230,18 +242,45 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
     }
 
     private fun importNumbersFromFile(uri: Uri) {
-        try {
-            contentResolver.openInputStream(uri)?.use { stream ->
-                val reader = BufferedReader(InputStreamReader(stream))
-                val content = reader.readText()
-                val existing = binding.etNumbers.text.toString()
-                val merged = if (existing.isBlank()) content else "$existing\n$content"
-                binding.etNumbers.setText(merged)
-                Toast.makeText(this, "File imported, now tap the ⬇ icon to load", Toast.LENGTH_SHORT).show()
+        // Reading a big file on the main thread froze the screen - read it in the background.
+        Thread {
+            try {
+                val content = contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.bufferedReader().readText()
+                }
+                runOnUiThread {
+                    if (content == null) {
+                        if (!isFinishing && !isDestroyed) {
+                            Toast.makeText(this, "Could not read file", Toast.LENGTH_LONG).show()
+                        }
+                        return@runOnUiThread
+                    }
+                    if (isFinishing || isDestroyed) {
+                        appendToDraftStore(content)
+                        return@runOnUiThread
+                    }
+                    val existing = binding.etNumbers.text.toString()
+                    val merged = if (existing.isBlank()) content else "$existing\n$content"
+                    binding.etNumbers.setText(merged)
+                    Toast.makeText(this, "File imported, now tap the ⬇ icon to load", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        Toast.makeText(this, "Could not read file: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
             }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Could not read file: ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        }.start()
+    }
+
+    /** Used when a background import/OCR finishes after this screen was already closed or
+     * recreated: the result goes straight into the saved draft so it is never lost - it shows up
+     * in the paste box the next time the screen is shown. */
+    private fun appendToDraftStore(newText: String) {
+        val store = NumberDraftStore(applicationContext)
+        val existing = store.getDraft()
+        store.setDraft(if (existing.isBlank()) newText else "$existing\n$newText")
     }
 
     private fun openImagePicker() {
@@ -265,16 +304,31 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         Toast.makeText(this, "Processing ${uris.size} image(s)...", Toast.LENGTH_SHORT).show()
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val allNumbers = linkedSetOf<String>()
-        var failedCount = 0
-        var remaining = uris.size
+        val failedCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val remaining = java.util.concurrent.atomic.AtomicInteger(uris.size)
+
+        // Called exactly once per image (atomic counter - the old plain counter could be hit
+        // from two threads at the same moment). The last one releases the OCR engine and
+        // reports the combined result.
+        fun oneDone() {
+            if (remaining.decrementAndGet() == 0) {
+                try {
+                    recognizer.close()
+                } catch (e: Exception) {
+                    // Ignore
+                }
+                val snapshot = synchronized(allNumbers) { LinkedHashSet(allNumbers) }
+                onImagesProcessed(snapshot, failedCount.get())
+            }
+        }
 
         Thread {
             uris.forEach { uri ->
                 try {
                     val bitmap = decodeSampledBitmap(uri, maxDimension = 2048)
                     if (bitmap == null) {
-                        synchronized(allNumbers) { failedCount++; remaining-- }
-                        if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                        failedCount.incrementAndGet()
+                        oneDone()
                         return@forEach
                     }
                     val image = InputImage.fromBitmap(bitmap, 0)
@@ -282,17 +336,16 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
                         .addOnSuccessListener { visionText ->
                             synchronized(allNumbers) {
                                 allNumbers.addAll(extractPhoneNumbers(visionText.text))
-                                remaining--
                             }
-                            if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                            oneDone()
                         }
                         .addOnFailureListener {
-                            synchronized(allNumbers) { failedCount++; remaining-- }
-                            if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                            failedCount.incrementAndGet()
+                            oneDone()
                         }
                 } catch (e: Exception) {
-                    synchronized(allNumbers) { failedCount++; remaining-- }
-                    if (remaining == 0) onImagesProcessed(allNumbers, failedCount)
+                    failedCount.incrementAndGet()
+                    oneDone()
                 }
             }
         }.start()
@@ -323,62 +376,28 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
         }
     }
 
-    /**
-     * Two-pass extraction so far fewer numbers get missed:
-     *  1) Plain digit runs (10-13 digits) exactly as OCR read them - covers the common case
-     *     of a number printed with no separators.
-     *  2) Digits allowed to have spaces/hyphens/dots/brackets between them (spaced-out or
-     *     STD-code-style numbers), which the old pattern also caught.
-     * Both passes tolerate the OCR noise (bullets, pipes, extra spacing) that was making real
-     * numbers slip through before.
-     */
-    private fun extractPhoneNumbers(text: String): Set<String> {
-        val raw = linkedSetOf<String>()
-
-        // Pass 1: clean, unbroken digit runs.
-        Regex("\\d{10,13}").findAll(text).forEach { match ->
-            raw.add(match.value)
-        }
-
-        // Pass 2: numbers with spacing/punctuation mixed in (e.g. "+91 90750-34748",
-        // "90750 34748", "(+91) 9075034748").
-        val spacedRegex = Regex("(\\+?\\d[\\d\\-\\s.()]{7,16}\\d)")
-        spacedRegex.findAll(text).forEach { match ->
-            val cleaned = match.value.replace(Regex("[\\s\\-.()]"), "")
-            val digitsOnly = cleaned.replace("+", "")
-            if (digitsOnly.length in 10..13 && digitsOnly.all { it.isDigit() }) {
-                raw.add(cleaned)
-            }
-        }
-
-        // A number written as "+91 9876543210" gets matched by BOTH passes above as two
-        // different-looking strings ("9876543210" from pass 1, "+919876543210" from pass 2) -
-        // without this step they'd be treated as two separate numbers (double-loading the same
-        // person) until a later, unrelated duplicate check happened to catch it. Collapsing by
-        // the actual normalized number here means the same real number is only ever reported
-        // once, however it was written.
-        val seenNormalized = mutableSetOf<String>()
-        val results = linkedSetOf<String>()
-        for (candidate in raw) {
-            val normalized = PhoneUtils.normalize(candidate)
-            if (seenNormalized.add(normalized)) results.add(candidate)
-        }
-
-        return results
-    }
+    // Parsing lives in NumberParser (regular expressions are built once, not per line).
+    private fun extractPhoneNumbers(text: String): Set<String> = NumberParser.extractPhoneNumbers(text)
 
     private fun onImagesProcessed(numbers: Set<String>, failedCount: Int) {
         runOnUiThread {
-            if (isFinishing || isDestroyed) return@runOnUiThread
+            val screenGone = isFinishing || isDestroyed
             if (numbers.isEmpty()) {
+                if (screenGone) return@runOnUiThread
                 val msg = if (failedCount > 0)
                     "Couldn't read $failedCount image(s) - try a plain screenshot instead of a cropped/rotated photo"
                 else "No numbers found in the image(s)"
                 Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 return@runOnUiThread
             }
-            val existing = binding.etNumbers.text.toString()
             val newText = numbers.joinToString("\n")
+            if (screenGone) {
+                // The screen was closed/recreated while OCR was running - keep the result in
+                // the saved draft instead of dropping it.
+                appendToDraftStore(newText)
+                return@runOnUiThread
+            }
+            val existing = binding.etNumbers.text.toString()
             val merged = if (existing.isBlank()) newText else "$existing\n$newText"
             binding.etNumbers.setText(merged)
             val summary = StringBuilder("${numbers.size} number(s) found (duplicates auto-removed)")
@@ -439,44 +458,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
             .show()
     }
 
-    /**
-     * Finds every phone-number-shaped token on one line of pasted/typed/imported text, using
-     * the same robust two-pass regex already proven for OCR (see extractPhoneNumbers) - so
-     * paste, file-import, and photo-import all get identical, strong detection instead of
-     * three different (and differently buggy) parsing rules.
-     *
-     * Handles, correctly:
-     *  - "Name, 9876543210" and "9876543210, Name" (name can be on either side)
-     *  - CSV rows with extra columns in any order ("9876543210,Name,email@x.com")
-     *  - A number that itself contains a hyphen ("9075-034748") - previously this got wrongly
-     *    split in half at the hyphen and half the number was silently lost
-     *  - More than one number on the same line - every one is kept, none dropped
-     *  - A line with no name at all - gets an auto label ("Lead 7") so every single lead
-     *    always has a label, never blank
-     */
-    private fun extractLeadsFromLine(line: String, startIndex: Int): List<Lead> {
-        val candidates = extractPhoneNumbers(line).toList()
-        if (candidates.isEmpty()) return emptyList()
-
-        var leftover = line
-        candidates.forEach { leftover = leftover.replace(it, " ") }
-        leftover = leftover.trim(' ', ',', '-', '|', '\t', ':', ';').trim()
-        val label = leftover.split(",").map { it.trim() }.firstOrNull { it.isNotBlank() && it.any { c -> c.isLetter() } }
-
-        return candidates.mapIndexedNotNull { i, token ->
-            val digitsOnly = token.filter { it.isDigit() }
-            // Reject anything that can't possibly be a real phone number (a stray 4-digit
-            // code, a partial OCR fragment, etc) - never load/dial something that isn't
-            // actually a phone number.
-            if (digitsOnly.length !in 10..13) return@mapIndexedNotNull null
-            val finalLabel = when {
-                !label.isNullOrBlank() && candidates.size == 1 -> label
-                !label.isNullOrBlank() -> "$label ${i + 1}"
-                else -> "Lead ${startIndex + i}"
-            }
-            Lead(finalLabel, token)
-        }
-    }
+    private fun extractLeadsFromLine(line: String, startIndex: Int): List<Lead> =
+        NumberParser.extractLeadsFromLine(line, startIndex)
 
     private fun loadNumbersFromInput() {
         if (engine.hasActiveList()) {
@@ -931,6 +914,7 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        draftHandler.removeCallbacks(draftSaveRunnable)
         // Guarded: if this Activity is being torn down before `engine` was ever set up (e.g.
         // it redirected straight to SubscriptionActivity because there's no active plan yet -
         // right after login, before engine = CallEngine(...) runs), engine.teardown() would
@@ -940,6 +924,8 @@ class MainActivity : AppCompatActivity(), CallEngineListener {
 
     override fun onPause() {
         super.onPause()
+        draftHandler.removeCallbacks(draftSaveRunnable)
+        saveDraftNow()
         // Final safety net: force a save the instant the app leaves the foreground (which
         // happens on every single call, since dialing switches to the Phone app) - so even in
         // the worst case, timing-wise, nothing is ever left un-saved.

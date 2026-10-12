@@ -3,6 +3,8 @@ package com.autodialer.app
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 data class Lead(
     val name: String?,
@@ -40,9 +42,35 @@ class SessionStore(context: Context) {
     private val prefs = context.getSharedPreferences("autodialer_session", Context.MODE_PRIVATE)
     private val leadsFile = "session_leads.json"
 
-    fun save(session: SavedSession) {
+    private companion object {
+        private val pendingLock = Any()
+        private var pendingLeads: List<Lead>? = null
+        private var pendingFile: String? = null
+
+        private val writer = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "session-writer").also { it.isDaemon = true }
+        }
+    }
+
+    /** Waits (briefly) for any queued list save to reach disk. Cheap when nothing is pending. */
+    fun flush() {
+        try {
+            writer.submit(Runnable { }).get(3, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            // Ignore - the background write will still finish on its own.
+        }
+    }
+
+    private fun writeLatestLeads() {
+        val leads: List<Lead>
+        val filename: String
+        synchronized(pendingLock) {
+            leads = pendingLeads ?: return
+            filename = pendingFile ?: return
+            pendingLeads = null
+        }
         val leadsArray = JSONArray()
-        session.leads.forEach { lead ->
+        for (lead in leads) {
             val obj = JSONObject()
             obj.put("name", lead.name ?: "")
             obj.put("phone", lead.phone)
@@ -50,9 +78,24 @@ class SessionStore(context: Context) {
             obj.put("outcome", lead.outcome ?: "")
             leadsArray.put(obj)
         }
+        FileStore.writeString(appContext, filename, leadsArray.toString())
+    }
+
+    fun save(session: SavedSession) {
         // The leads list can run into the thousands - keep it out of SharedPreferences (which
-        // rewrites its entire file on every save) and in its own plain file instead.
-        FileStore.writeString(appContext, leadsFile, leadsArray.toString())
+        // rewrites its entire file on every save) and in its own plain file instead. The file is
+        // written on a background thread from a quick snapshot (several rapid saves collapse into
+        // one write of the newest state), so saving never makes the screen wait.
+        val snapshot = ArrayList<Lead>(session.leads.size)
+        for (lead in session.leads) snapshot.add(Lead(lead.name, lead.phone, lead.status, lead.outcome))
+        val needsSchedule: Boolean
+        synchronized(pendingLock) {
+            needsSchedule = pendingLeads == null
+            pendingLeads = snapshot
+            pendingFile = leadsFile
+        }
+        if (needsSchedule) writer.execute { writeLatestLeads() }
+
         prefs.edit()
             .putString("sessionName", session.sessionName)
             .putInt("currentIndex", session.currentIndex)
@@ -68,6 +111,17 @@ class SessionStore(context: Context) {
 
     fun load(): SavedSession? {
         if (!prefs.getBoolean("hasSession", false)) return null
+        flush()
+        return try {
+            loadInternal()
+        } catch (e: Exception) {
+            // An unreadable saved list must never crash the app on every launch - treat it as
+            // "nothing to restore" (the numbers already called are safe in the call log).
+            null
+        }
+    }
+
+    private fun loadInternal(): SavedSession? {
         var leadsJson = FileStore.readString(appContext, leadsFile)
         if (leadsJson == null) {
             // Fall back to the old SharedPreferences-based storage so an in-progress list
@@ -108,8 +162,12 @@ class SessionStore(context: Context) {
     }
 
     fun clear() {
+        synchronized(pendingLock) {
+            pendingLeads = null
+        }
         prefs.edit().clear().apply()
-        FileStore.delete(appContext, leadsFile)
+        // Queued behind any write already running, so a late save can't bring the file back.
+        writer.execute { FileStore.delete(appContext, leadsFile) }
     }
 
     fun hasSavedSession(): Boolean = prefs.getBoolean("hasSession", false)

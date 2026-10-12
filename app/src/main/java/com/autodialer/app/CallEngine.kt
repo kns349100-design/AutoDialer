@@ -260,9 +260,12 @@ class CallEngine(
         // Catches anything that could slip past the load-time dedup - e.g. the same number in
         // two different formats, or any other edge case - so a double call is never possible.
         val normalized = PhoneUtils.normalize(lead.phone)
+        // Status is checked first so the (comparatively slow) number normalising only runs for
+        // numbers that were actually finished - keeps dialing instant even on a very long list.
         val duplicateWithinThisList = leads.withIndex().any { (i, other) ->
-            i != index && PhoneUtils.normalize(other.phone) == normalized &&
-                (other.status == CallSequencer.Status.COMPLETED || other.status == CallSequencer.Status.SKIPPED)
+            i != index &&
+                (other.status == CallSequencer.Status.COMPLETED || other.status == CallSequencer.Status.SKIPPED) &&
+                PhoneUtils.normalize(other.phone) == normalized
         }
         if (duplicateWithinThisList || callLogStore.calledToday(normalized)) {
             listener.onLog("Skipping ${lead.phone} - already called, preventing a double call")
@@ -312,8 +315,13 @@ class CallEngine(
             // background during this very call (normal, since dialing switches to the Phone
             // app), the next restore knows a call was actually placed here.
             persist()
-        } catch (e: SecurityException) {
-            listener.onEngineError("Call permission missing")
+        } catch (e: Exception) {
+            // Nothing was actually dialed (permission missing, no phone app, etc) - put the
+            // number back to Pending so it is never wrongly treated as already called.
+            leads[index].status = CallSequencer.Status.PENDING
+            sequencer?.statuses?.set(index, CallSequencer.Status.PENDING)
+            listener.onLeadUpdated(index, CallSequencer.Status.PENDING)
+            listener.onEngineError(if (e is SecurityException) "Call permission missing" else "Could not place the call")
             stop()
         }
     }

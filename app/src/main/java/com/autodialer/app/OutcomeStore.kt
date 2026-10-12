@@ -8,9 +8,25 @@ class OutcomeStore(context: Context) {
 
     private val prefs = context.getSharedPreferences("autodialer_outcomes", Context.MODE_PRIVATE)
 
+    private companion object {
+        /** Parsed once and shared by every screen. The number list asks for an outcome's
+         * colour for every row it draws - re-parsing the saved JSON each time made scrolling
+         * a long list janky. */
+        @Volatile
+        private var cachedCustom: List<Outcome>? = null
+    }
+
     fun allOutcomes(): List<Outcome> = Outcome.DEFAULTS + customOutcomes()
 
     fun customOutcomes(): List<Outcome> {
+        val cached = cachedCustom
+        if (cached != null) return cached
+        val parsed = parseCustom()
+        cachedCustom = parsed
+        return parsed
+    }
+
+    private fun parseCustom(): List<Outcome> {
         val json = prefs.getString("custom", null) ?: return emptyList()
         return try {
             val array = JSONArray(json)
@@ -74,5 +90,6 @@ class OutcomeStore(context: Context) {
             array.put(obj)
         }
         prefs.edit().putString("custom", array.toString()).apply()
+        cachedCustom = list.toList()
     }
 }

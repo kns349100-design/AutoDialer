@@ -9,12 +9,24 @@ import java.io.File
  * it on every single change, which gets noticeably slow - and memory-heavy - once one value
  * inside it is this big. Plain files don't have that problem and comfortably handle lists in
  * the thousands.
+ *
+ * Writes are atomic: the new content goes to a temporary file first and only then replaces the
+ * real file. If the phone dies, the battery is pulled or Android kills the app half-way through
+ * a save, the previous complete file is still there - never a half-written, unreadable one.
  */
 object FileStore {
 
     fun writeString(context: Context, filename: String, content: String) {
         try {
-            File(context.filesDir, filename).writeText(content)
+            val target = File(context.filesDir, filename)
+            val temp = File(context.filesDir, "$filename.tmp")
+            temp.writeText(content)
+            if (!temp.renameTo(target)) {
+                // Some file systems refuse to rename over an existing file - fall back to a
+                // direct write rather than losing the save.
+                target.writeText(content)
+                temp.delete()
+            }
         } catch (e: Exception) {
             // Best-effort - a failed save should never crash the app.
         }
@@ -32,6 +44,7 @@ object FileStore {
     fun delete(context: Context, filename: String) {
         try {
             File(context.filesDir, filename).delete()
+            File(context.filesDir, "$filename.tmp").delete()
         } catch (e: Exception) {
             // Ignore
         }

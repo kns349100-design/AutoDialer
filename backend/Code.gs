@@ -46,8 +46,12 @@ function doGet(e) {
     if (action === 'createPaymentLink') return handleCreatePaymentLink(e);
     if (action === 'checkPayment') return handleCheckPayment(e);
     if (action === 'razorpayVerify') return handleRazorpayVerify(e);
-    if (action === 'login') return handleLogin(e);
-    if (action === 'resetPin') return handleResetPin(e);
+    if (action === 'razorpayCreateOrder') return handleRazorpayCreateOrder(e);
+    if (action === 'razorpaySync') return handleRazorpaySync(e);
+    if (action === 'trialInfo') return handleTrialInfo(e);
+    if (action === 'sendOtp') return handleSendOtp(e);
+    if (action === 'verifyOtp') return handleVerifyOtp(e);
+    if (action === 'login' || action === 'resetPin') return jsonResponse({ status: 'error', message: 'Login now uses OTP - please update the app.' });
     if (action === 'checkSession') return handleCheckSession(e);
     if (action === 'startTrial') return handleStartTrial(e);
     return jsonResponse({ status: 'error', message: 'unknown action' });
@@ -55,6 +59,18 @@ function doGet(e) {
     // Never let a raw exception escape - the app can only understand JSON.
     return jsonResponse({ status: 'error', message: 'Server error, please try again' });
   }
+}
+
+/** Like getSheet, but creates the tab (with a header row) the first time it is needed, so new
+ * features never fail just because a tab was not created by hand. */
+function getOrCreateSheet(name, headers) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.appendRow(headers);
+  }
+  return sheet;
 }
 
 function getSheet(name) {
@@ -272,11 +288,218 @@ function handleCheckPayment(e) {
 /**
  * ---- Razorpay (in-app payment via Razorpay Android SDK) ----
  * Script Properties needed: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET (Project Settings -> Script Properties).
- * The secret never goes into the app. The app only sends the Razorpay order id; this asks
- * Razorpay's own servers whether that order is really paid, so a fake request can't unlock a plan.
- * The plan is decided from the amount Razorpay says was paid (never from anything the app sends).
+ * The secret never goes into the app.
+ *
+ * Why a payment ALWAYS ends up as access:
+ *  1. The app asks THIS script to create the order (price decided here, never by the app). The order
+ *     is written to the "Orders" tab together with the device it belongs to BEFORE the payment
+ *     screen even opens.
+ *  2. After paying, the app asks us to confirm the order. We ask Razorpay itself whether it is paid
+ *     (the app cannot fake that) and activate the plan.
+ *  3. If anything goes wrong in between (app killed, no internet, phone restarted, app data
+ *     cleared...), every normal status check tells the app "you have an unclaimed order", and the
+ *     app then calls razorpaySync, which re-checks all this device's recent orders with Razorpay and
+ *     activates every paid one. A paid order can only ever be activated once.
  */
-var RAZORPAY_AMOUNT_TO_PLAN = { 1000: 'HOURLY12', 30000: 'MONTHLY', 100000: 'YEARLY' }; // paise
+var RAZORPAY_PLANS = {
+  HOURLY12: { amount: 900, label: '12 Hour Access' },     // Rs 9
+  MONTHLY: { amount: 29900, label: '1 Month Access' },    // Rs 299
+  YEARLY: { amount: 99900, label: '1 Year Access' }       // Rs 999
+};
+// Every amount (paise) that activates a plan. The OLD prices stay listed on purpose, so an order that
+// was created before a price change is still honoured when it gets paid.
+var RAZORPAY_AMOUNT_TO_PLAN = {
+  900: 'HOURLY12', 1000: 'HOURLY12',
+  29900: 'MONTHLY', 30000: 'MONTHLY',
+  99900: 'YEARLY', 100000: 'YEARLY'
+};
+var ORDERS_HEADERS = ['OrderId', 'DeviceId', 'Plan', 'AmountPaise', 'CreatedAt', 'Status'];
+var ORDERS_SCAN_ROWS = 300;                    // only the newest rows are ever scanned (keeps it fast)
+var ORDER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function razorpayKeys() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('RAZORPAY_KEY_ID');
+  var secret = props.getProperty('RAZORPAY_KEY_SECRET');
+  if (!id || !secret) return null;
+  return { id: id, secret: secret, auth: 'Basic ' + Utilities.base64Encode(id + ':' + secret) };
+}
+
+/** Newest ORDERS_SCAN_ROWS rows of the Orders tab as {row, orderId, deviceId, plan, createdAt, status}. */
+function recentOrders() {
+  var sheet = getOrCreateSheet('Orders', ORDERS_HEADERS);
+  var last = sheet.getLastRow();
+  if (last < 2) return { sheet: sheet, list: [] };
+  var first = Math.max(2, last - ORDERS_SCAN_ROWS + 1);
+  var values = sheet.getRange(first, 1, last - first + 1, 6).getValues();
+  var list = [];
+  for (var i = 0; i < values.length; i++) {
+    list.push({
+      row: first + i,
+      orderId: String(values[i][0]),
+      deviceId: String(values[i][1]).trim(),
+      plan: String(values[i][2]),
+      createdAt: Number(values[i][4]) || 0,
+      status: String(values[i][5])
+    });
+  }
+  return { sheet: sheet, list: list };
+}
+
+function setOrderStatus(orderId, status) {
+  var r = recentOrders();
+  for (var i = 0; i < r.list.length; i++) {
+    if (r.list[i].orderId === orderId) {
+      r.sheet.getRange(r.list[i].row, 6).setValue(status);
+      return;
+    }
+  }
+}
+
+/** True if this device has an order that is not activated/expired yet and is still young enough
+ * to be worth re-checking. Cheap (reads the sheet only, never calls Razorpay). */
+function deviceHasUnclaimedOrders(deviceId) {
+  try {
+    var now = Date.now();
+    var list = recentOrders().list;
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (o.deviceId === deviceId && o.status !== 'activated' && o.status !== 'expired' && now - o.createdAt < ORDER_MAX_AGE_MS) return true;
+    }
+  } catch (err) {
+    // never let this optional hint break a normal status check
+  }
+  return false;
+}
+
+/** Latest non-revoked expiry for a device across the Activations tab: {expiryAt, planType}. */
+function latestActivationFor(deviceId) {
+  var data = getSheet('Activations').getDataRange().getValues();
+  var latestExpiry = 0;
+  var latestType = '';
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (String(row[0]).trim() !== deviceId) continue;
+    var revoked = row[5];
+    if (revoked === true || String(revoked).toUpperCase() === 'TRUE') continue;
+    var expiryAt = Number(row[3]) || 0;
+    if (expiryAt > latestExpiry) {
+      latestExpiry = expiryAt;
+      latestType = row[4];
+    }
+  }
+  return { expiryAt: latestExpiry, planType: latestType };
+}
+
+/** App asks us to create the order, so the price can never be chosen by the app. */
+function handleRazorpayCreateOrder(e) {
+  var planKey = cleanInput(e.parameter.plan, 20);
+  var deviceId = cleanInput(e.parameter.deviceId, 200);
+  var plan = RAZORPAY_PLANS[planKey];
+  if (!plan || !deviceId) return jsonResponse({ status: 'error', message: 'Invalid plan' });
+  var keys = razorpayKeys();
+  if (!keys) return jsonResponse({ status: 'error', message: 'Payment server is not configured' });
+
+  var order;
+  try {
+    var res = UrlFetchApp.fetch('https://api.razorpay.com/v1/orders', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: keys.auth },
+      payload: JSON.stringify({
+        amount: plan.amount,
+        currency: 'INR',
+        receipt: 'app_' + planKey + '_' + Date.now(),
+        notes: { plan: planKey, deviceId: deviceId }
+      }),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() === 401) return jsonResponse({ status: 'error', message: 'Razorpay authentication failed' });
+    order = JSON.parse(res.getContentText());
+    if (res.getResponseCode() !== 200 || !order || !order.id) {
+      return jsonResponse({ status: 'error', message: 'Could not create the order. Please try again.' });
+    }
+  } catch (err) {
+    return jsonResponse({ status: 'error', message: 'Could not reach the payment server. Please try again.' });
+  }
+
+  return withLock(function () {
+    // Written BEFORE the payment screen opens - this is what makes recovery possible later.
+    getOrCreateSheet('Orders', ORDERS_HEADERS).appendRow([safeCell(order.id), safeCell(deviceId), planKey, plan.amount, Date.now(), 'created']);
+    return jsonResponse({ status: 'ok', orderId: order.id, amount: order.amount, keyId: keys.id, planLabel: plan.label });
+  });
+}
+
+/**
+ * Activates one Razorpay order for a device. MUST be called with the script lock held.
+ * Returns {ok, expiryAt, planType, message, orderStatus}. Safe to call any number of times: an order
+ * is only ever activated once, and only ever for the device it was created for.
+ */
+function activateRazorpayOrder(orderId, deviceId, keys) {
+  var actSheet = getSheet('Activations');
+  var rows = actSheet.getDataRange().getValues();
+
+  // Already activated? (idempotency - the same paid order can never grant time twice)
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][1]) === orderId) {
+      if (String(rows[i][0]).trim() !== deviceId) {
+        return { ok: false, message: 'Ye payment kisi aur device par activate ho chuka hai', orderStatus: 'paid' };
+      }
+      return { ok: true, expiryAt: Number(rows[i][3]), planType: rows[i][4] };
+    }
+  }
+
+  // An order created for one device can only be claimed by that device.
+  var recent = recentOrders().list;
+  for (var k = 0; k < recent.length; k++) {
+    if (recent[k].orderId === orderId && recent[k].deviceId !== deviceId) {
+      return { ok: false, message: 'Ye order kisi aur device ka hai', orderStatus: 'foreign' };
+    }
+  }
+
+  var response;
+  try {
+    response = UrlFetchApp.fetch('https://api.razorpay.com/v1/orders/' + encodeURIComponent(orderId), {
+      headers: { Authorization: keys.auth },
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    return { ok: false, message: 'Razorpay se contact nahi ho paya', orderStatus: 'unreachable' };
+  }
+  var order;
+  try {
+    order = JSON.parse(response.getContentText());
+  } catch (err) {
+    return { ok: false, message: 'Razorpay se galat response mila', orderStatus: 'unreachable' };
+  }
+  if (response.getResponseCode() !== 200 || !order || order.id !== orderId) {
+    return { ok: false, message: 'Order nahi mila', orderStatus: 'unknown' };
+  }
+  if (order.status !== 'paid' || Number(order.amount_paid) < Number(order.amount)) {
+    return { ok: false, message: 'Payment abhi complete nahi hua (status: ' + (order.status || 'unknown') + ')', orderStatus: order.status || 'unknown' };
+  }
+  var planType = RAZORPAY_AMOUNT_TO_PLAN[Number(order.amount)];
+  if (!planType || order.currency !== 'INR') {
+    return { ok: false, message: 'Payment amount kisi plan se match nahi karta', orderStatus: 'unknown' };
+  }
+
+  // Money-safety: extend from whichever is later - now or this device's current expiry - so a payment
+  // can only ever ADD time, never replace/shorten what is already paid for.
+  var now = Date.now();
+  var base = now;
+  for (var j = 1; j < rows.length; j++) {
+    if (String(rows[j][0]).trim() !== deviceId) continue;
+    var revoked = rows[j][5];
+    if (revoked === true || String(revoked).toUpperCase() === 'TRUE') continue;
+    if (String(rows[j][4]).toUpperCase() === 'FREE') continue;
+    var exp = Number(rows[j][3]) || 0;
+    if (exp > base) base = exp;
+  }
+  var expiryAt = grantExpiry(planType, base);
+  actSheet.appendRow([safeCell(deviceId), safeCell(orderId), now, expiryAt, planType, false]);
+  try { setOrderStatus(orderId, 'activated'); } catch (err) { /* the activation itself is what matters */ }
+  return { ok: true, expiryAt: expiryAt, planType: planType };
+}
 
 function handleRazorpayVerify(e) {
   var orderId = cleanInput(e.parameter.orderId, 100);
@@ -284,72 +507,56 @@ function handleRazorpayVerify(e) {
   if (!orderId || !deviceId || !/^order_[A-Za-z0-9]+$/.test(orderId)) {
     return jsonResponse({ status: 'error', message: 'missing params' });
   }
-  var props = PropertiesService.getScriptProperties();
-  var keyId = props.getProperty('RAZORPAY_KEY_ID');
-  var keySecret = props.getProperty('RAZORPAY_KEY_SECRET');
-  if (!keyId || !keySecret) {
-    return jsonResponse({ status: 'error', message: 'Payment server is not configured' });
-  }
+  var keys = razorpayKeys();
+  if (!keys) return jsonResponse({ status: 'error', message: 'Payment server is not configured' });
 
   return withLock(function () {
-    var actSheet = getSheet('Activations');
-    var rows = actSheet.getDataRange().getValues();
-
-    // Idempotency: the same paid order can never grant time twice.
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][1]) === orderId) {
-        if (String(rows[i][0]).trim() !== deviceId) {
-          return jsonResponse({ status: 'error', message: 'Ye payment kisi aur device par activate ho chuka hai' });
-        }
-        return jsonResponse({ status: 'ok', expiryAt: Number(rows[i][3]), planType: rows[i][4] });
-      }
-    }
-
-    var response;
-    try {
-      response = UrlFetchApp.fetch('https://api.razorpay.com/v1/orders/' + encodeURIComponent(orderId), {
-        headers: { Authorization: 'Basic ' + Utilities.base64Encode(keyId + ':' + keySecret) },
-        muteHttpExceptions: true
-      });
-    } catch (err) {
-      return jsonResponse({ status: 'error', message: 'Razorpay se contact nahi ho paya' });
-    }
-
-    var order;
-    try {
-      order = JSON.parse(response.getContentText());
-    } catch (err) {
-      return jsonResponse({ status: 'error', message: 'Razorpay se galat response mila' });
-    }
-    if (response.getResponseCode() !== 200 || !order || order.id !== orderId) {
-      return jsonResponse({ status: 'error', message: 'Order nahi mila' });
-    }
-    if (order.status !== 'paid' || Number(order.amount_paid) < Number(order.amount)) {
-      return jsonResponse({ status: 'error', message: 'Payment abhi complete nahi hua (status: ' + (order.status || 'unknown') + ')' });
-    }
-    var planType = RAZORPAY_AMOUNT_TO_PLAN[Number(order.amount)];
-    if (!planType || order.currency !== 'INR') {
-      return jsonResponse({ status: 'error', message: 'Payment amount kisi plan se match nahi karta' });
-    }
-
-    // Money-safety: extend from whichever is later - now or this device's current expiry -
-    // so a payment can only ever ADD time, never replace/shorten what's already paid for.
-    var now = Date.now();
-    var base = now;
-    for (var j = 1; j < rows.length; j++) {
-      if (String(rows[j][0]).trim() !== deviceId) continue;
-      var revoked = rows[j][5];
-      if (revoked === true || String(revoked).toUpperCase() === 'TRUE') continue;
-      if (String(rows[j][4]).toUpperCase() === 'FREE') continue;
-      var exp = Number(rows[j][3]) || 0;
-      if (exp > base) base = exp;
-    }
-    var expiryAt = grantExpiry(planType, base);
-    actSheet.appendRow([safeCell(deviceId), safeCell(orderId), now, expiryAt, planType, false]);
-    return jsonResponse({ status: 'ok', expiryAt: expiryAt, planType: planType });
+    var r = activateRazorpayOrder(orderId, deviceId, keys);
+    if (r.ok) return jsonResponse({ status: 'ok', expiryAt: r.expiryAt, planType: r.planType });
+    return jsonResponse({ status: 'error', message: r.message, orderStatus: r.orderStatus });
   });
 }
 
+/**
+ * Safety net: re-checks every recent unclaimed order of this device with Razorpay and activates the
+ * paid ones. Called by the app whenever a status check reports hasUnclaimed.
+ */
+function handleRazorpaySync(e) {
+  var deviceId = cleanInput(e.parameter.deviceId, 200);
+  if (!deviceId) return jsonResponse({ status: 'error', message: 'missing deviceId' });
+  var keys = razorpayKeys();
+  if (!keys) return jsonResponse({ status: 'error', message: 'Payment server is not configured' });
+
+  return withLock(function () {
+    var now = Date.now();
+    var mine = [];
+    var list = recentOrders().list;
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (o.deviceId === deviceId && o.status !== 'activated' && o.status !== 'expired' && now - o.createdAt < ORDER_MAX_AGE_MS) mine.push(o);
+    }
+    mine.sort(function (a, b) { return a.createdAt - b.createdAt; }); // oldest first, so extensions stack in order
+    mine = mine.slice(-5);
+
+    var activated = 0;
+    for (var m = 0; m < mine.length; m++) {
+      var r = activateRazorpayOrder(mine[m].orderId, deviceId, keys);
+      if (r.ok) {
+        activated++;
+        continue;
+      }
+      // Stop re-checking orders that were clearly never paid: an order nobody even tried to pay for
+      // after 2 hours, or one still unpaid after a day.
+      var age = now - mine[m].createdAt;
+      if ((r.orderStatus === 'created' && age > 2 * 60 * 60 * 1000) || (r.orderStatus !== 'unreachable' && age > 24 * 60 * 60 * 1000)) {
+        setOrderStatus(mine[m].orderId, 'expired');
+      }
+    }
+    var latest = latestActivationFor(deviceId);
+    if (latest.expiryAt === 0) return jsonResponse({ status: 'not_found', activated: activated });
+    return jsonResponse({ status: 'ok', expiryAt: latest.expiryAt, planType: latest.planType, activated: activated });
+  });
+}
 
 function grantExpiry(type, now) {
   if (type === 'FREE') return now + (100 * 365 * 24 * 60 * 60 * 1000);
@@ -425,8 +632,9 @@ function handleCheck(e) {
     }
   }
 
-  if (latestExpiry === 0) return jsonResponse({ status: 'not_found' });
-  return jsonResponse({ status: 'ok', expiryAt: latestExpiry, planType: latestType });
+  var unclaimed = deviceHasUnclaimedOrders(deviceId);
+  if (latestExpiry === 0) return jsonResponse({ status: 'not_found', hasUnclaimed: unclaimed });
+  return jsonResponse({ status: 'ok', expiryAt: latestExpiry, planType: latestType, hasUnclaimed: unclaimed });
 }
 
 function jsonResponse(obj) {
@@ -527,6 +735,176 @@ function handleLogin(e) {
   });
 }
 
+/**
+ * ---- Phone number + OTP login (free: the SMS is sent from YOUR OWN phone's SIM) ----
+ * Uses the open-source "SMS Gateway for Android" app (cloud relay api.sms-gate.app, free, no signup).
+ * Script Properties needed: SMSGATE_USER, SMSGATE_PASS (shown inside the SMS Gateway app under
+ * "Cloud Server"). See OTP_SETUP.md.
+ *
+ * The OTP is generated and checked only here on the server (kept 10 minutes in the script cache,
+ * stored hashed). One number = one device: a correct OTP writes this device's id as the number's
+ * ActiveDeviceId, so any other device logged in with that number is signed out the next time it
+ * checks its session (handleCheckSession).
+ *
+ * Abuse / SIM protection: 60 s between OTPs per number, 5 per number per hour, 10 per device per
+ * hour, and a global cap (kept under a normal SIM's daily SMS limit so the SIM never gets blocked).
+ * A wrong code is allowed 5 tries per OTP.
+ */
+var OTP_TTL_SECONDS = 600;
+var OTP_MAX_VERIFY_ATTEMPTS = 5;
+var OTP_RESEND_COOLDOWN_SECONDS = 60;
+var OTP_MAX_PER_PHONE_PER_HOUR = 5;
+var OTP_MAX_PER_DEVICE_PER_HOUR = 10;
+var OTP_MAX_GLOBAL_PER_6H = 30;
+
+function otpHash(phone, otp) {
+  return hashPin(phone + ':' + otp);
+}
+
+function randomOtp() {
+  var bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    Utilities.getUuid() + ':' + Date.now() + ':' + Math.random()
+  );
+  var n = 0;
+  for (var i = 0; i < 6; i++) n = n * 256 + ((bytes[i] + 256) % 256);
+  return String(100000 + (n % 900000));
+}
+
+function readCounter(cache, key) {
+  return Number(cache.get(key)) || 0;
+}
+
+function bumpCounter(cache, key, ttlSeconds) {
+  cache.put(key, String(readCounter(cache, key) + 1), ttlSeconds);
+}
+
+/** Sends the SMS through the SMS Gateway app running on your phone. Returns true if accepted. */
+function sendOtpSms(user, pass, phone, otp) {
+  try {
+    var res = UrlFetchApp.fetch('https://api.sms-gate.app/3rdparty/v1/message', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Basic ' + Utilities.base64Encode(user + ':' + pass) },
+      payload: JSON.stringify({
+        textMessage: { text: 'Your CallConnect login OTP is ' + otp + '. Do not share it with anyone.' },
+        phoneNumbers: [phone]
+      }),
+      muteHttpExceptions: true
+    });
+    var code = res.getResponseCode();
+    if (code >= 200 && code < 300) return true;
+    console.error('SMS gateway rejected the request: HTTP ' + code + ' ' + String(res.getContentText()).substring(0, 200));
+    return false;
+  } catch (err) {
+    console.error('SMS gateway call failed: ' + err);
+    return false;
+  }
+}
+
+/** Run this once from the Apps Script editor (after editing the number) to check the SMS setup. */
+function testSmsGateway() {
+  var props = PropertiesService.getScriptProperties();
+  var ok = sendOtpSms(props.getProperty('SMSGATE_USER'), props.getProperty('SMSGATE_PASS'), '+91XXXXXXXXXX', '123456');
+  Logger.log(ok ? 'Accepted - the SMS should arrive in a few seconds' : 'Rejected - see Executions log for the reason');
+}
+
+function handleSendOtp(e) {
+  var phone = cleanInput(e.parameter.phone, 20);
+  var deviceId = cleanInput(e.parameter.deviceId, 200);
+  if (!/^\+91[6-9][0-9]{9}$/.test(phone) || !deviceId) {
+    return jsonResponse({ status: 'error', message: 'Enter a valid 10-digit mobile number' });
+  }
+  var props = PropertiesService.getScriptProperties();
+  var smsUser = props.getProperty('SMSGATE_USER');
+  var smsPass = props.getProperty('SMSGATE_PASS');
+  if (!smsUser || !smsPass) {
+    return jsonResponse({ status: 'error', message: 'SMS service is not configured yet' });
+  }
+
+  return withLock(function () {
+    var cache = CacheService.getScriptCache();
+    var now = Date.now();
+    var otpKey = 'otp_' + phone;
+
+    var existing = cache.get(otpKey);
+    if (existing) {
+      var prev = JSON.parse(existing);
+      var waitS = OTP_RESEND_COOLDOWN_SECONDS - Math.floor((now - prev.sentAt) / 1000);
+      if (waitS > 0) {
+        return jsonResponse({ status: 'error', message: 'Please wait ' + waitS + ' sec before requesting another OTP' });
+      }
+    }
+    if (readCounter(cache, 'otpcnt_p_' + phone) >= OTP_MAX_PER_PHONE_PER_HOUR) {
+      return jsonResponse({ status: 'error', message: 'Too many OTP requests for this number. Try again after some time.' });
+    }
+    if (readCounter(cache, 'otpcnt_d_' + deviceId) >= OTP_MAX_PER_DEVICE_PER_HOUR) {
+      return jsonResponse({ status: 'error', message: 'Too many OTP requests from this device. Try again after some time.' });
+    }
+    if (readCounter(cache, 'otpcnt_g') >= OTP_MAX_GLOBAL_PER_6H) {
+      return jsonResponse({ status: 'error', message: 'OTP service is busy right now. Please try again later.' });
+    }
+
+    var otp = randomOtp();
+    if (!sendOtpSms(smsUser, smsPass, phone, otp)) {
+      return jsonResponse({ status: 'error', message: 'Could not send the OTP SMS. Please try again in a minute.' });
+    }
+
+    cache.put(otpKey, JSON.stringify({ h: otpHash(phone, otp), sentAt: now, attempts: 0 }), OTP_TTL_SECONDS);
+    bumpCounter(cache, 'otpcnt_p_' + phone, 3600);
+    bumpCounter(cache, 'otpcnt_d_' + deviceId, 3600);
+    bumpCounter(cache, 'otpcnt_g', 21600);
+    return jsonResponse({ status: 'ok', resendAfter: OTP_RESEND_COOLDOWN_SECONDS });
+  });
+}
+
+function handleVerifyOtp(e) {
+  var phone = cleanInput(e.parameter.phone, 20);
+  var otp = cleanInput(e.parameter.otp, 10);
+  var deviceId = cleanInput(e.parameter.deviceId, 200);
+  if (!/^\+91[6-9][0-9]{9}$/.test(phone) || !/^[0-9]{6}$/.test(otp) || !deviceId) {
+    return jsonResponse({ status: 'error', message: 'Enter the 6-digit OTP' });
+  }
+
+  return withLock(function () {
+    var cache = CacheService.getScriptCache();
+    var otpKey = 'otp_' + phone;
+    var raw = cache.get(otpKey);
+    if (!raw) {
+      return jsonResponse({ status: 'error', message: 'OTP expired or not requested. Please request a new OTP.' });
+    }
+    var rec = JSON.parse(raw);
+    var now = Date.now();
+
+    if (rec.h !== otpHash(phone, otp)) {
+      rec.attempts = (rec.attempts || 0) + 1;
+      if (rec.attempts >= OTP_MAX_VERIFY_ATTEMPTS) {
+        cache.remove(otpKey);
+        return jsonResponse({ status: 'error', message: 'Too many wrong attempts. Please request a new OTP.' });
+      }
+      var ttlLeft = OTP_TTL_SECONDS - Math.floor((now - rec.sentAt) / 1000);
+      if (ttlLeft < 1) {
+        cache.remove(otpKey);
+        return jsonResponse({ status: 'error', message: 'OTP expired. Please request a new OTP.' });
+      }
+      cache.put(otpKey, JSON.stringify(rec), ttlLeft);
+      return jsonResponse({ status: 'error', message: 'Wrong OTP (' + (OTP_MAX_VERIFY_ATTEMPTS - rec.attempts) + ' tries left)' });
+    }
+
+    cache.remove(otpKey); // one-time: this OTP can never be used again
+
+    // Correct OTP - this device becomes the one and only active device for this number.
+    var sheet = getUsersSheet();
+    var rowNum = findUserRow(sheet, phone);
+    if (rowNum === -1) {
+      sheet.appendRow([safeCell(phone), '', safeCell(deviceId), now, 0, 0]);
+      return jsonResponse({ status: 'ok', registered: true });
+    }
+    sheet.getRange(rowNum, 3, 1, 4).setValues([[safeCell(deviceId), now, 0, 0]]);
+    return jsonResponse({ status: 'ok', registered: false });
+  });
+}
+
 function handleResetPin(e) {
   var phone = cleanInput(e.parameter.phone, 20);
   var newPin = cleanInput(e.parameter.newPin, 10);
@@ -578,6 +956,16 @@ function handleCheckSession(e) {
  * phone number (and its login) is what survives a reinstall, not anything stored locally.
  * Locked so two rapid taps (or two devices) can never both start a trial for the same number.
  */
+var TRIAL_MS = 24 * 60 * 60 * 1000;
+var TRIAL_DEVICE_HEADERS = ['DeviceId', 'Phone', 'StartedAt'];
+
+/**
+ * Starts the 24-hour free trial. Strict rules, all checked here on the server (never on the phone):
+ *  - once per phone number (Users tab)
+ *  - once per device (TrialDevices tab) - a second SIM / number on the same phone does not get another one
+ *  - if the number's trial is still running (e.g. after a reinstall or a new login), it is simply
+ *    RESUMED with its original start time - it is never restarted or extended.
+ */
 function handleStartTrial(e) {
   var phone = cleanInput(e.parameter.phone, 20);
   var deviceId = cleanInput(e.parameter.deviceId, 200);
@@ -587,26 +975,59 @@ function handleStartTrial(e) {
 
   return withLock(function () {
     var sheet = getUsersSheet();
+    var devSheet = getOrCreateSheet('TrialDevices', TRIAL_DEVICE_HEADERS);
     var rowNum = findUserRow(sheet, phone);
     var now = Date.now();
 
-    if (rowNum === -1) {
-      // Shouldn't normally happen (logging in already creates this row) - create a minimal
-      // row so the trial is still correctly tracked against this phone number.
-      sheet.appendRow([safeCell(phone), '', safeCell(deviceId), now, 0, 0, true, now]);
-      return jsonResponse({ status: 'ok', startedAt: now });
+    var trialUsed = false;
+    var usedAt = 0;
+    if (rowNum !== -1) {
+      // getRange width 8 to also read TrialUsed/TrialStartedAt (older rows created before these
+      // columns existed simply read as blank/0, which correctly means "trial not used yet").
+      var row = sheet.getRange(rowNum, 1, 1, 8).getValues()[0];
+      trialUsed = row[6] === true || String(row[6]).toUpperCase() === 'TRUE';
+      usedAt = Number(row[7]) || 0;
     }
 
-    // getRange width 8 to also read TrialUsed/TrialStartedAt (older rows created before these
-    // columns existed simply read as blank/0, which correctly means "trial not used yet").
-    var row = sheet.getRange(rowNum, 1, 1, 8).getValues()[0];
-    var trialUsed = row[6] === true || String(row[6]).toUpperCase() === 'TRUE';
     if (trialUsed) {
-      var usedAt = Number(row[7]) || now;
-      return jsonResponse({ status: 'error', message: 'Free trial already used on this account', startedAt: usedAt });
+      var started = usedAt || now;
+      if (now - started < TRIAL_MS) {
+        return jsonResponse({ status: 'ok', startedAt: started, resumed: true });
+      }
+      return jsonResponse({ status: 'error', message: 'Free trial already used on this account', startedAt: started });
     }
 
-    sheet.getRange(rowNum, 7, 1, 2).setValues([[true, now]]);
+    // This number is new to the trial - but has THIS DEVICE already had one (with any number)?
+    var devData = devSheet.getDataRange().getValues();
+    for (var i = 1; i < devData.length; i++) {
+      if (String(devData[i][0]).trim() === deviceId) {
+        var devStarted = Number(devData[i][2]) || now;
+        if (String(devData[i][1]).trim() === phone) {
+          return jsonResponse({ status: 'ok', startedAt: devStarted, resumed: true });
+        }
+        return jsonResponse({ status: 'error', message: 'Free trial already used on this device', startedAt: devStarted });
+      }
+    }
+
+    if (rowNum === -1) {
+      sheet.appendRow([safeCell(phone), '', safeCell(deviceId), now, 0, 0, true, now]);
+    } else {
+      sheet.getRange(rowNum, 7, 1, 2).setValues([[true, now]]);
+    }
+    devSheet.appendRow([safeCell(deviceId), safeCell(phone), now]);
     return jsonResponse({ status: 'ok', startedAt: now });
   });
+}
+
+/** Lets a freshly installed / newly logged-in app learn whether this number already has a trial. */
+function handleTrialInfo(e) {
+  var phone = cleanInput(e.parameter.phone, 20);
+  if (!phone) return jsonResponse({ status: 'error', message: 'missing phone' });
+  var sheet = getUsersSheet();
+  var rowNum = findUserRow(sheet, phone);
+  if (rowNum === -1) return jsonResponse({ status: 'ok', used: false });
+  var row = sheet.getRange(rowNum, 1, 1, 8).getValues()[0];
+  var used = row[6] === true || String(row[6]).toUpperCase() === 'TRUE';
+  if (!used) return jsonResponse({ status: 'ok', used: false });
+  return jsonResponse({ status: 'ok', used: true, startedAt: Number(row[7]) || 0 });
 }

@@ -1,18 +1,18 @@
 # Razorpay in-app payment (PhonePe / GPay / Paytm directly, no QR)
 
-Flow: app -> Netlify `/api/create-order` -> Razorpay Checkout SDK (UPI apps list) ->
-Apps Script `razorpayVerify` asks Razorpay if the order is paid -> plan activates.
+Flow: app -> Apps Script `razorpayCreateOrder` (price decided on the server, order saved in the Orders tab)
+-> Razorpay Checkout (UPI apps list) -> Apps Script `razorpayVerify` asks Razorpay if the order is paid -> plan activates.
+Safety net: if the app never confirms, `check` reports `hasUnclaimed` and the app calls `razorpaySync`.
 
-## Do this once
-1. Apps Script (backend/Code.gs): paste the updated file, then Project Settings -> Script Properties:
-   - `RAZORPAY_KEY_ID`     = live key id
-   - `RAZORPAY_KEY_SECRET` = live key secret (never put it in the app)
+## One-time setup
+1. Apps Script: paste backend/Code.gs. Project Settings -> Script Properties:
+   RAZORPAY_KEY_ID = live key id, RAZORPAY_KEY_SECRET = live secret (never put the secret in the app).
 2. Deploy -> Manage deployments -> pencil -> New version -> Deploy (same Web App URL stays).
-3. Netlify site `callconnect-app` must already have the create-order function + env vars (done for the website).
-4. Push this project to GitHub -> Actions builds the APK.
+   The tabs Orders and TrialDevices are created automatically.
+3. Prices: Code.gs RAZORPAY_PLANS (server), SubscriptionManager.kt + activity_subscription.xml (app text), pricing.html +
+   netlify/functions/create-order.js (website). Currently Rs 9 / 299 / 999.
+4. Push the project to GitHub -> Actions builds the APK.
 
 ## Test
-Pay the Rs 10 plan with PhonePe/GPay. Plan should activate right after payment.
-Check Razorpay Dashboard -> Transactions -> Payments, and the `Activations` sheet (new row with order_...).
-
-Old SMS/UPI-VPA auto-verification was removed (READ_SMS no longer needed).
+Pay the Rs 9 plan with PhonePe/GPay: the plan should activate right after paying. Check Razorpay -> Transactions,
+and the Orders tab (Status = activated) and Activations tab (new row with order_...).

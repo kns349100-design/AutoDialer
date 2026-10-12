@@ -10,13 +10,10 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Free phone number + PIN login (no SMS, no billing) backed by the same Google
- * Apps Script sheet used for subscriptions. Rules:
- *  - A phone number's PIN is set the first time it ever logs in.
- *  - After that, the same PIN is required to log in again.
- *  - "Forgot PIN" lets the number set a brand new PIN without needing the old one.
- *  - Logging in successfully makes that device the ONLY active device for the
- *    number - any other device that was logged in gets signed out (detected via
+ * Phone number + OTP login. The OTP SMS is sent and checked by the Google Apps Script backend
+ * (see backend/Code.gs and OTP_SETUP.md); this app never generates or sees the OTP itself.
+ *  - Logging in with a correct OTP makes this device the ONLY active device for the number -
+ *    any other device that was logged in gets signed out (detected via
  *    checkSessionInBackground, called periodically while the app is open).
  */
 class AuthManager(private val context: Context) {
@@ -38,55 +35,46 @@ class AuthManager(private val context: Context) {
         prefs.edit().clear().apply()
     }
 
-    /**
-     * Attempts to log in with phone+PIN. If this phone number has never logged in
-     * before, this PIN becomes its PIN (registered = true in the callback).
-     */
-    fun login(phone: String, pin: String, onResult: (success: Boolean, registered: Boolean, message: String) -> Unit) {
-        if (SubscriptionManager.SCRIPT_URL.startsWith("PASTE_")) {
-            onResult(false, false, "Backend not set up yet - follow backend/SETUP.md")
-            return
-        }
-        Thread {
-            try {
-                val url = "${SubscriptionManager.SCRIPT_URL}?action=login" +
-                    "&phone=${URLEncoder.encode(phone, "UTF-8")}" +
-                    "&pin=${URLEncoder.encode(pin, "UTF-8")}" +
-                    "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
-                val response = httpGet(url)
-                val json = JSONObject(response)
-                if (json.optString("status") == "ok") {
-                    val registered = json.optBoolean("registered", false)
-                    mainHandler.post {
-                        onResult(true, registered, if (registered) "PIN set! You're logged in." else "Logged in.")
-                    }
-                } else {
-                    mainHandler.post { onResult(false, false, json.optString("message", "Login failed")) }
-                }
-            } catch (e: Exception) {
-                mainHandler.post { onResult(false, false, "Check your internet and try again") }
-            }
-        }.start()
-    }
-
-    /** Sets a brand new PIN for a phone number without requiring the old one. */
-    fun resetPin(phone: String, newPin: String, onResult: (success: Boolean, message: String) -> Unit) {
+    /** Asks the backend to SMS a 6-digit OTP to the phone number (+91XXXXXXXXXX). */
+    fun sendOtp(phone: String, onResult: (success: Boolean, message: String) -> Unit) {
         if (SubscriptionManager.SCRIPT_URL.startsWith("PASTE_")) {
             onResult(false, "Backend not set up yet - follow backend/SETUP.md")
             return
         }
         Thread {
             try {
-                val url = "${SubscriptionManager.SCRIPT_URL}?action=resetPin" +
+                val url = "${SubscriptionManager.SCRIPT_URL}?action=sendOtp" +
                     "&phone=${URLEncoder.encode(phone, "UTF-8")}" +
-                    "&newPin=${URLEncoder.encode(newPin, "UTF-8")}" +
                     "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
-                val response = httpGet(url)
-                val json = JSONObject(response)
+                val json = JSONObject(httpGet(url))
                 if (json.optString("status") == "ok") {
-                    mainHandler.post { onResult(true, "PIN reset! You can log in with the new PIN now.") }
+                    mainHandler.post { onResult(true, "OTP sent") }
                 } else {
-                    mainHandler.post { onResult(false, json.optString("message", "Reset failed")) }
+                    mainHandler.post { onResult(false, json.optString("message", "Could not send OTP")) }
+                }
+            } catch (e: Exception) {
+                mainHandler.post { onResult(false, "Check your internet and try again") }
+            }
+        }.start()
+    }
+
+    /** Checks the OTP. On success this device becomes the number's only active device. */
+    fun verifyOtp(phone: String, otp: String, onResult: (success: Boolean, message: String) -> Unit) {
+        if (SubscriptionManager.SCRIPT_URL.startsWith("PASTE_")) {
+            onResult(false, "Backend not set up yet - follow backend/SETUP.md")
+            return
+        }
+        Thread {
+            try {
+                val url = "${SubscriptionManager.SCRIPT_URL}?action=verifyOtp" +
+                    "&phone=${URLEncoder.encode(phone, "UTF-8")}" +
+                    "&otp=${URLEncoder.encode(otp, "UTF-8")}" +
+                    "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
+                val json = JSONObject(httpGet(url))
+                if (json.optString("status") == "ok") {
+                    mainHandler.post { onResult(true, "Logged in") }
+                } else {
+                    mainHandler.post { onResult(false, json.optString("message", "Login failed")) }
                 }
             } catch (e: Exception) {
                 mainHandler.post { onResult(false, "Check your internet and try again") }

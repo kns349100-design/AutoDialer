@@ -3,6 +3,7 @@ package com.autodialer.app
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -28,9 +29,6 @@ class SubscriptionManager(private val context: Context) {
         // TODO: replace with your deployed Apps Script Web App URL
         const val SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyHEnFWqibZeO774YRKcdlyWb_EgOWyFAi8gmiFDkbajNZQo5TiIL18yOdLp3g1KY9v/exec"
 
-        /** Netlify site that creates Razorpay orders (secret key lives only on the server). */
-        const val API_BASE = "https://callconnect-app.netlify.app"
-
         const val TRIAL_DURATION_MS = 24L * 60 * 60 * 1000 // 1 day
 
         /** UPI ID payments go to directly (no gateway, no whitelisting delay - money lands
@@ -40,13 +38,13 @@ class SubscriptionManager(private val context: Context) {
         const val UPI_VPA = "kamleshshinde4748@okaxis"
         const val UPI_PAYEE_NAME = "Kamlesh Nana Shinde"
 
-        const val PRICE_HOURLY12_PAISE = 1000   // Rs 10
-        const val PRICE_MONTHLY_PAISE = 30000   // Rs 300
-        const val PRICE_YEARLY_PAISE = 100000   // Rs 1000
+        const val PRICE_HOURLY12_PAISE = 900    // Rs 9
+        const val PRICE_MONTHLY_PAISE = 29900   // Rs 299
+        const val PRICE_YEARLY_PAISE = 99900    // Rs 999
 
-        const val PRICE_MONTHLY = "Rs 300 / month"
-        const val PRICE_YEARLY = "Rs 1000 / year"
-        const val PRICE_HOURLY12 = "Rs 10 / 12 hours"
+        const val PRICE_MONTHLY = "Rs 299 / month"
+        const val PRICE_YEARLY = "Rs 999 / year"
+        const val PRICE_HOURLY12 = "Rs 9 / 12 hours"
     }
 
     private val prefs = context.getSharedPreferences("autodialer_license", Context.MODE_PRIVATE)
@@ -95,7 +93,8 @@ class SubscriptionManager(private val context: Context) {
                     prefs.edit().putLong("trialStartedAt", startedAt).apply()
                 }
                 if (json.optString("status") == "ok") {
-                    mainHandler.post { onResult(true, "Free trial started!") }
+                    val msg = if (json.optBoolean("resumed", false)) "Your free trial is already running - continuing it" else "Free trial started!"
+                    mainHandler.post { onResult(true, msg) }
                 } else {
                     val message = json.optString("message", "Free trial already used on this account")
                     mainHandler.post { onResult(false, message) }
@@ -106,22 +105,50 @@ class SubscriptionManager(private val context: Context) {
         }.start()
     }
 
+    /**
+     * "Now", but immune to the phone's clock being turned BACK to stretch a trial or plan. Time is
+     * only ever allowed to move forward: if the system clock is found earlier than what this app has
+     * already seen, time keeps advancing from the last trusted moment using the phone's uptime
+     * clock (which the user cannot change) instead of following the wrong clock.
+     */
+    internal fun secureNowAt(wall: Long, elapsed: Long): Long {
+        val lastTrusted = prefs.getLong("tsTrusted", 0L)
+        val lastElapsed = prefs.getLong("tsElapsed", -1L)
+        if (lastTrusted <= 0L || lastElapsed < 0L) {
+            prefs.edit().putLong("tsTrusted", wall).putLong("tsElapsed", elapsed).apply()
+            return wall
+        }
+        val expected = if (elapsed >= lastElapsed) lastTrusted + (elapsed - lastElapsed) else lastTrusted
+        if (wall >= expected - 120_000L) {
+            // Clock looks normal (a couple of minutes of drift is tolerated). Re-anchor now and
+            // then so a long gap between app opens (or a restart) is followed by the real clock.
+            if (wall - lastTrusted > 60_000L || elapsed < lastElapsed) {
+                prefs.edit().putLong("tsTrusted", wall).putLong("tsElapsed", elapsed).apply()
+            }
+            return wall
+        }
+        // Clock was set backwards - ignore it.
+        return expected
+    }
+
+    private fun secureNow(): Long = secureNowAt(System.currentTimeMillis(), SystemClock.elapsedRealtime())
+
     private fun trialStartedAt(): Long = prefs.getLong("trialStartedAt", 0L)
 
     fun isTrialActive(): Boolean {
         val startedAt = trialStartedAt()
         if (startedAt == 0L) return false
-        val elapsed = System.currentTimeMillis() - startedAt
+        val elapsed = secureNow() - startedAt
         return elapsed in 0 until TRIAL_DURATION_MS
     }
 
     fun trialMillisRemaining(): Long =
-        (TRIAL_DURATION_MS - (System.currentTimeMillis() - trialStartedAt())).coerceAtLeast(0)
+        (TRIAL_DURATION_MS - (secureNow() - trialStartedAt())).coerceAtLeast(0)
 
     private fun cachedExpiry(): Long = prefs.getLong("cachedExpiry", 0L)
     private fun cachedPlanType(): String = prefs.getString("cachedPlanType", "") ?: ""
 
-    fun isSubscribed(): Boolean = System.currentTimeMillis() < cachedExpiry()
+    fun isSubscribed(): Boolean = secureNow() < cachedExpiry()
 
     fun hasAccess(): Boolean = isSubscribed() || isTrialActive()
 
@@ -136,7 +163,7 @@ class SubscriptionManager(private val context: Context) {
      * nothing is active. */
     fun remainingTimeLabel(): String {
         val millisLeft = when {
-            isSubscribed() -> (cachedExpiry() - System.currentTimeMillis()).coerceAtLeast(0)
+            isSubscribed() -> (cachedExpiry() - secureNow()).coerceAtLeast(0)
             isTrialActive() -> trialMillisRemaining()
             else -> return ""
         }
@@ -159,30 +186,69 @@ class SubscriptionManager(private val context: Context) {
         else -> "No active plan - tap to choose one"
     }
 
-    /** Call this on app start / resume when internet may be available. Silently no-ops if offline, URL not configured, or checked very recently (throttled to reduce background network load / perceived slowness). */
-    fun refreshStatusInBackground() {
+    /** Call this on app start / resume when internet may be available. Silently no-ops if offline, URL not configured, or checked very recently (throttled to reduce background network load / perceived slowness).
+     * Besides refreshing the plan it (1) restores a free trial that this phone number already has but this install doesn't know about (reinstall / new login) and (2) if the server reports a payment that was made but never confirmed, claims it - so a payment can never end without access. */
+    fun refreshStatusInBackground(force: Boolean = false) {
         if (SCRIPT_URL.startsWith("PASTE_")) return
         val now = System.currentTimeMillis()
         val lastChecked = prefs.getLong("lastStatusCheck", 0L)
-        if (now - lastChecked < 3 * 60 * 1000) return
+        if (!force && now - lastChecked < 3 * 60 * 1000) return
         prefs.edit().putLong("lastStatusCheck", now).apply()
         Thread {
             try {
                 val url = "$SCRIPT_URL?action=check&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
-                val response = httpGet(url)
-                val json = JSONObject(response)
+                val json = JSONObject(httpGet(url))
                 if (json.optString("status") == "ok") {
-                    val expiryAt = json.optLong("expiryAt", 0L)
-                    val planType = json.optString("planType", "")
-                    prefs.edit()
-                        .putLong("cachedExpiry", expiryAt)
-                        .putString("cachedPlanType", planType)
-                        .apply()
+                    applyServerPlan(json)
+                }
+                if (json.optBoolean("hasUnclaimed", false)) {
+                    syncUnclaimedPayments()
                 }
             } catch (e: Exception) {
                 // Offline or backend not reachable - keep using cached/local status.
             }
+            restoreTrialFromServer()
         }.start()
+    }
+
+    private fun applyServerPlan(json: JSONObject) {
+        val expiryAt = json.optLong("expiryAt", 0L)
+        val planType = json.optString("planType", "")
+        prefs.edit()
+            .putLong("cachedExpiry", expiryAt)
+            .putString("cachedPlanType", planType)
+            .apply()
+    }
+
+    /** Asks the server to re-check every recent order of this device with Razorpay and activate the paid ones. Runs on the caller's (background) thread. */
+    private fun syncUnclaimedPayments() {
+        try {
+            val url = "$SCRIPT_URL?action=razorpaySync&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
+            val json = JSONObject(httpGet(url))
+            if (json.optString("status") == "ok") {
+                applyServerPlan(json)
+                if (json.optInt("activated", 0) > 0) clearPendingPayment()
+            }
+        } catch (e: Exception) {
+            // Will simply be retried on the next status refresh.
+        }
+    }
+
+    /** If this phone number already used its free trial but this install has no record of it (app reinstalled / cleared, or logged in on a new phone), pick the original start time up from the server - so the remaining time continues instead of the trial looking like it never happened. Runs on the caller's (background) thread. */
+    private fun restoreTrialFromServer() {
+        try {
+            if (prefs.contains("trialStartedAt")) return
+            val phone = AuthManager(context).phoneNumber()
+            if (phone.isBlank()) return
+            val url = "$SCRIPT_URL?action=trialInfo&phone=${URLEncoder.encode(phone, "UTF-8")}"
+            val json = JSONObject(httpGet(url))
+            if (json.optString("status") == "ok" && json.optBoolean("used", false)) {
+                val startedAt = json.optLong("startedAt", 0L)
+                if (startedAt > 0L) prefs.edit().putLong("trialStartedAt", startedAt).apply()
+            }
+        } catch (e: Exception) {
+            // Optional - ignored if offline.
+        }
     }
 
     /** Redeems a coupon code against the server. Calls back on the main thread with a result message. */
@@ -197,7 +263,7 @@ class SubscriptionManager(private val context: Context) {
      * only ever add time, never remove it.
      */
     fun grantPlanLocally(planType: String) {
-        val now = System.currentTimeMillis()
+        val now = secureNow()
         val durationMs = planDurationMs(planType)
         val base = maxOf(cachedExpiry(), now)
         val newExpiry = base + durationMs
@@ -228,7 +294,7 @@ class SubscriptionManager(private val context: Context) {
         val expiry = when {
             isSubscribed() -> cachedExpiry()
             isTrialActive() -> trialStartedAt() + TRIAL_DURATION_MS
-            else -> System.currentTimeMillis() // defensive fallback - should never be hit in practice
+            else -> secureNow() // defensive fallback - should never be hit in practice
         }
         val fmt = java.text.SimpleDateFormat("d MMM yyyy, h:mm a", java.util.Locale.getDefault())
         return fmt.format(java.util.Date(expiry))
@@ -263,13 +329,11 @@ class SubscriptionManager(private val context: Context) {
     data class PendingPayment(val planType: String, val amountRupees: Int, val startedAt: Long, val reference: String)
 
     /** Returns the in-progress payment (if any) that hasn't been confirmed or given up on yet.
-     * A pending payment older than 24 hours is treated as abandoned and cleared automatically,
-     * so a very old, forgotten attempt can never suddenly auto-activate from a coincidental
-     * SMS much later. */
+     * A pending payment older than 7 days is treated as abandoned and cleared automatically. */
     fun loadPendingPayment(): PendingPayment? {
         val planType = prefs.getString("pendingPayPlanType", null) ?: return null
         val startedAt = prefs.getLong("pendingPayStartedAt", 0L)
-        if (startedAt == 0L || System.currentTimeMillis() - startedAt > 24L * 60 * 60 * 1000) {
+        if (startedAt == 0L || System.currentTimeMillis() - startedAt > 7L * 24 * 60 * 60 * 1000) {
             clearPendingPayment()
             return null
         }
@@ -383,29 +447,30 @@ class SubscriptionManager(private val context: Context) {
 
     data class RazorpayOrder(val orderId: String, val amountPaise: Int, val keyId: String, val planLabel: String)
 
-    private fun planToApiId(planType: String): String = when (planType) {
-        "HOURLY12" -> "starter"
-        "YEARLY" -> "yearly"
-        else -> "monthly"
-    }
-
-    /** Asks the website backend to create a Razorpay order for the plan (the price is decided
-     * on the server, not by the app). Calls back on the main thread. */
+    /** Asks the backend to create a Razorpay order for the plan. The PRICE is decided on the server
+     * (the app only names the plan), and the order is logged against this device before the payment
+     * screen opens - which is what lets a paid order always be recovered. Calls back on the main thread. */
     fun createRazorpayOrder(planType: String, onResult: (order: RazorpayOrder?, message: String) -> Unit) {
+        if (SCRIPT_URL.startsWith("PASTE_")) {
+            onResult(null, "Backend URL is not set - follow backend/SETUP.md")
+            return
+        }
         Thread {
             try {
-                val body = JSONObject().put("plan", planToApiId(planType)).toString()
-                val json = JSONObject(httpPost("$API_BASE/api/create-order", body))
-                if (json.has("order_id")) {
+                val url = "$SCRIPT_URL?action=razorpayCreateOrder" +
+                    "&plan=${URLEncoder.encode(planType, "UTF-8")}" +
+                    "&deviceId=${URLEncoder.encode(deviceId(), "UTF-8")}"
+                val json = JSONObject(httpGet(url))
+                if (json.optString("status") == "ok") {
                     val order = RazorpayOrder(
-                        json.getString("order_id"),
+                        json.getString("orderId"),
                         json.getInt("amount"),
-                        json.getString("key_id"),
-                        json.optString("plan_label", "")
+                        json.getString("keyId"),
+                        json.optString("planLabel", "")
                     )
                     mainHandler.post { onResult(order, "") }
                 } else {
-                    val message = json.optString("error", "Could not start payment")
+                    val message = json.optString("message", "Could not start payment")
                     mainHandler.post { onResult(null, message) }
                 }
             } catch (e: Exception) {
@@ -444,23 +509,6 @@ class SubscriptionManager(private val context: Context) {
                 mainHandler.post { onResult(false, null, "Could not confirm payment - check your internet") }
             }
         }.start()
-    }
-
-    private fun httpPost(urlString: String, jsonBody: String): String {
-        val conn = URL(urlString).openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.doOutput = true
-        conn.connectTimeout = 15000
-        conn.readTimeout = 15000
-        try {
-            conn.outputStream.use { it.write(jsonBody.toByteArray(Charsets.UTF_8)) }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            return stream?.bufferedReader()?.use { it.readText() } ?: "{\"error\":\"Empty response (HTTP $code)\"}"
-        } finally {
-            conn.disconnect()
-        }
     }
 
     private fun httpGet(urlString: String): String {

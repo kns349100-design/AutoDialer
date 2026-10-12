@@ -48,13 +48,13 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultWithDataListener 
             }
         }
         binding.btnPay12Hour.setOnClickListener {
-            startRazorpayPayment("HOURLY12", 10, "12 Hour Access")
+            startRazorpayPayment("HOURLY12", 9, "12 Hour Access")
         }
         binding.btnPayMonthly.setOnClickListener {
-            startRazorpayPayment("MONTHLY", 300, "1 Month Access")
+            startRazorpayPayment("MONTHLY", 299, "1 Month Access")
         }
         binding.btnPayYearly.setOnClickListener {
-            startRazorpayPayment("YEARLY", 1000, "1 Year Access")
+            startRazorpayPayment("YEARLY", 999, "1 Year Access")
         }
         binding.btnCheckPayment.setOnClickListener {
             sendPaymentProofOnWhatsApp()
@@ -158,7 +158,7 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultWithDataListener 
      * quiet = true is used for silent recovery when the screen is reopened - it never shows an
      * error for an order that simply was never paid. Safe to repeat: the server grants an order
      * only once. */
-    private fun confirmPendingPayment(quiet: Boolean) {
+    private fun confirmPendingPayment(quiet: Boolean, attempt: Int = 0) {
         val orderId = pendingOrderId ?: return
         if (confirming) return
         confirming = true
@@ -167,8 +167,21 @@ class SubscriptionActivity : AppCompatActivity(), PaymentResultWithDataListener 
             startSlowHint(binding.tvPaymentResult, "Still confirming - the server can take a few extra seconds, hang on...")
         }
         subscriptionManager.confirmRazorpayPayment(orderId) { success, planType, message ->
-            confirming = false
             cancelSlowHint()
+            // The payment already went through at this point - so if confirming it fails (no
+            // network for a moment, the server is slow to wake up, Razorpay hasn't marked the
+            // order paid yet), keep trying on our own a few times instead of making the customer
+            // do anything. Anything still unconfirmed after that is picked up automatically later.
+            val retryable = !success && !quiet && attempt < 3 && !message.contains("kisi aur device")
+            if (retryable) {
+                binding.tvPaymentResult.text = "Confirming your payment... (try ${attempt + 2} of 4)"
+                slowHintHandler.postDelayed({
+                    confirming = false
+                    if (!isFinishing && !isDestroyed) confirmPendingPayment(quiet = false, attempt = attempt + 1)
+                }, 2000L * (attempt + 1))
+                return@confirmRazorpayPayment
+            }
+            confirming = false
             setPayButtonsEnabled(true)
             if (success && !planType.isNullOrBlank()) {
                 val amount = if (pendingAmountRupees > 0) pendingAmountRupees else null
